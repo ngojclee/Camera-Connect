@@ -52,3 +52,35 @@ test_*.py
 !test_components.py
 .venv/
 CameraConnect_Portable/
+
+# --- Camera Connect (Go refactor + secrets hygiene) ---
+# Secrets & user config — NEVER commit
+rclone.conf
+secrets/
+config.local.yaml
+*Config.yaml
+!CameraConnectConfig.example.yaml
+.env
+.env.*
+
+# Binaries fetched/bundled by build & installer
+rclone.exe
+installer/Output/
+build/bin/
+build/release/
+build/installer/
+*.msi
+
+# Go build
+*.exe
+*.syso~
+/go.work*
+
+# Frontend
+node_modules/
+frontend/dist/
+frontend/wailsjs/
+
+# OS/editor
+.vscode/
+.idea/

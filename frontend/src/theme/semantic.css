@@ -1,0 +1,47 @@
+/* Compatibility and semantic aliases for projects consuming LN UI Engine. */
+:root,
+[data-theme="light"],
+[data-theme="dark"] {
+  --surface: var(--bg-card);
+  --bg-surface: var(--bg-card);
+  --bg-soft: var(--bg-secondary);
+  --bg-card-alt: var(--bg-elevated);
+  --bg-modifier-hover: var(--bg-hover);
+
+  --color-primary: var(--accent);
+  --accent-blue: var(--accent);
+  --accent-purple: #7c3aed;
+  --text-muted: var(--text-dim);
+  --text-success: var(--success);
+  --text-warning: var(--warning);
+  --text-danger: var(--danger);
+
+  --status-new: var(--accent);
+  --status-new-bg: var(--accent-subtle);
+  --status-processing: var(--warning);
+  --status-processing-bg: var(--warning-bg);
+  --status-packed: #7c3aed;
+  --status-packed-bg: rgba(124, 58, 237, 0.12);
+  --status-shipped: #0891b2;
+  --status-shipped-bg: rgba(8, 145, 178, 0.12);
+  --status-delivered: var(--success);
+  --status-delivered-bg: var(--success-bg);
+  --status-cancelled: var(--danger);
+  --status-cancelled-bg: var(--danger-bg);
+  --status-refunded: #64748b;
+  --status-refunded-bg: rgba(100, 116, 139, 0.12);
+  --status-pending: var(--warning);
+  --status-pending-bg: var(--warning-bg);
+
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+[data-theme="dark"] {
+  --accent-purple: #a78bfa;
+  --status-packed: #a78bfa;
+  --status-packed-bg: rgba(167, 139, 250, 0.16);
+  --status-shipped: #38bdf8;
+  --status-shipped-bg: rgba(56, 189, 248, 0.15);
+  --status-refunded: #94a3b8;
+  --status-refunded-bg: rgba(148, 163, 184, 0.14);
+}

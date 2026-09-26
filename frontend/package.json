@@ -1,0 +1,19 @@
+{
+  "name": "camera-connect-frontend",
+  "private": true,
+  "version": "0.1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 34115 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview --port 4173 --strictPort"
+  },
+  "devDependencies": {
+    "@tailwindcss/container-queries": "^0.1.1",
+    "@tailwindcss/forms": "^0.5.11",
+    "@tailwindcss/vite": "^4.2.2",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^5.8.3",
+    "vite": "^5.4.19"
+  }
+}

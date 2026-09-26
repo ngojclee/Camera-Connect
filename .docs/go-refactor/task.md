@@ -13,15 +13,17 @@
 - [x] Compile check OK (`py_compile` all touched files)
 - [x] Commit + push to `main`
 
-## Phase 1 — Repo skeleton & foundations
-- [ ] Create `LICENSE` = PolyForm Noncommercial 1.0.0 (owner confirms) + repo hygiene `.gitignore` (rclone.exe/conf, secrets/, dist/, build/, config.local.yaml)
-- [ ] `go.mod` (Go 1.25.x): wails v2.12, go-winio, yaml.v3, modernc.org/sqlite, go-ole, go-keyring
-- [ ] Copy+adapt from LightroomSync: `internal/ipc`, `internal/uiapi`, `internal/coordinator`, `internal/logstream`, `internal/platform/windows`, `internal/tray`, `internal/update`, root `main.go`/`wails_*.go`/`platform_*.go`
-- [ ] `internal/config`: layered loader (`config.yaml` shared + `config.local.yaml` machine) with dot-path get/set; `MigrateFromLegacyPaths` importing `{exe}Config.yaml` + `~/.sony_camera_sync`
-- [ ] `internal/profiles`: schema (id/name/base_path/templates/file_types/backup), `active_profile`, `machines.<hostname>.profile_paths` override resolution
-- [ ] `internal/store`: SQLite schema — `files(path,camera,profile,size,sha256?,synced_at,dest)`, `jobs(id,kind,payload,state,attempts,next_retry)`, `stats` — migrations via `embed`
-- [ ] IPC contract: commands `ping, get_status, get_config, save_config, list_cameras, scan_now, list_profiles, set_profile, import_dates, backup_status, retry_backups, appdb_login, appdb_logout, vault_push, vault_pull, check_update, download_update, subscribe_logs, shutdown_agent`
-- [ ] Gate: `go build ./...` clean; agent + UI exes launch; `--action get-status` CLI works
+## Phase 1 — Repo skeleton & foundations ✅ SHIPPED (2026-09-26)
+- [x] Create `LICENSE` = PolyForm Noncommercial 1.0.0 + repo hygiene `.gitignore`; untracked `rclone.exe`, installer binary, `CameraConnectConfig.yaml`→`.example.yaml`
+- [x] `go.mod` (module `github.com/ngojclee/camera-connect`): wails v2.16, go-winio, yaml.v3, modernc.org/sqlite (go-ole/go-keyring deferred to Phase 3/5)
+- [x] Copy+adapt from LightroomSync: `internal/ipc`, `internal/uiapi`, `internal/coordinator`, `internal/logstream`, `internal/platform/windows`, `internal/tray`, `internal/update`, root `main.go`/`wails_*.go`/`platform_*.go` — all Lightroom identifiers removed/renamed (heartbeat+lock monitor dropped; Phase 5 replaces with AppDB heartbeat)
+- [x] `internal/config`: layered loader (`config.yaml` shared + `config.local.yaml` machine); `MigrateFromLegacyPaths` imports `{exe}Config.yaml`→ `profiles[default]` + shared settings + backup copy (free_space forced OFF)
+- [x] Profiles folded into `internal/config` (`Profile` schema + `active_profile` + `local.profile_paths` per-machine override + `ResolvedBasePath`)
+- [x] `internal/store`: SQLite (modernc) — `files(camera_path,camera,profile,size,sha256?,dest,state,synced_at)`, `jobs(id,kind,payload,state,attempts,next_retry,last_error)`, `kv`
+- [x] IPC contract: `ping, get_status, get_config, save_config, list_cameras, scan_now, list_profiles, set_profile, import_dates, backup_status, retry_backups, appdb_status, appdb_login, appdb_logout, vault_push, vault_pull, check_update, download_update, subscribe_logs, pause_sync, resume_sync, shutdown_agent`
+- [x] `cmd/agent`: mutex, event bus, single-flight sync worker, watchdog, tray host + status publisher, resume detector, path health monitor, update check/download, inline IPC dispatch
+- [x] Frontend skeleton: Vite+TS+Tailwind v4 + LN-UI-Engine theme CSS imported; dashboard renders status/cameras/profiles/logs via `window.go` bridge
+- [x] Gate: `go build ./...` ✅ · `go test ./...` ✅ · `go vet ./...` ✅ · `npm run build` ✅ · agent launch + `--action ping/get-status/get-config/save-config/scan-now/shutdown-agent` all verified over named pipe; `%LOCALAPPDATA%\CameraConnect\{config.yaml,config.local.yaml,cache.db,tray_status.json}` created
 
 ## Phase 2 — Detection v2 + Mass Storage engine
 - [ ] `internal/detect`: WMI `Win32_PnPEntity` poll (2s) — class-based (`PortableDevice`/`WUDFWpdFs`) + VID/PID friendly-name table (Sony 054C, Canon 04A9, Nikon 04B0, Fuji 04CB, Panasonic 04DA, OM 07B4, GoPro 2672, DJI 2CA3)

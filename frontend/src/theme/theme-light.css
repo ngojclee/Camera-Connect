@@ -1,0 +1,56 @@
+/* LN operations light theme tokens. */
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-primary: #ffffff;
+  --bg-secondary: #fbfbfa;
+  --bg-card: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f1f1ef;
+  --bg-input: #ffffff;
+  --bg-sidebar: #f7f7f5;
+
+  --border: #e3e3e0;
+  --border-hover: #c7c7c4;
+
+  --text-primary: #37352f;
+  --text-secondary: #6b6b6b;
+  --text-dim: #9b9a97;
+
+  --accent: #2383e2;
+  --accent-hover: #1b6ec2;
+  --accent-subtle: #e8f0fe;
+
+  --success: #0f7b0f;
+  --success-bg: #e6f4e6;
+  --warning: #c77c14;
+  --warning-bg: #fef3e0;
+  --danger: #e03e3e;
+  --danger-bg: #fce8e8;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.1);
+
+  --radius: 6px;
+  --radius-lg: 10px;
+  --header-band-height: 58px;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  --engine-workbench-gap: 16px;
+  --engine-card-gap: 16px;
+  --engine-card-header-padding: 16px 20px;
+  --engine-card-body-padding: 16px 18px 18px;
+  --engine-card-body-inline: 18px;
+  --engine-card-body-block: 16px;
+  --engine-workbench-sidebar-width: clamp(240px, 16vw, 300px);
+  --engine-workbench-sidebar-wide-width: clamp(260px, 20vw, 340px);
+  --engine-workbench-sidebar-compact-width: clamp(260px, 18vw, 316px);
+  --engine-workbench-min-height: 620px;
+  --engine-workbench-viewport-offset: 118px;
+  --engine-workbench-height: max(
+    var(--engine-workbench-min-height),
+    calc(100dvh - var(--engine-workbench-viewport-offset))
+  );
+}

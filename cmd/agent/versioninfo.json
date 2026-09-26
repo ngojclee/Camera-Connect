@@ -1,0 +1,27 @@
+{
+    "FixedFileInfo": {
+        "FileVersion": { "Major": 2, "Minor": 0, "Patch": 4, "Build": 0 },
+        "ProductVersion": { "Major": 2, "Minor": 0, "Patch": 4, "Build": 0 },
+        "FileFlagsMask": "3f",
+        "FileFlags ": "00",
+        "FileOS": "040004",
+        "FileType": "01",
+        "FileSubType": "00"
+    },
+    "StringFileInfo": {
+        "Comments": "Camera Catalog & Preset Synchronization Agent",
+        "CompanyName": "LuxeClaw Studio",
+        "FileDescription": "Camera Connect Agent",
+        "FileVersion": "2.0.7.202604071812",
+        "InternalName": "CameraConnectAgent",
+        "LegalCopyright": "© 2024-2026 LuxeClaw Studio. All rights reserved.",
+        "OriginalFilename": "CameraConnectAgent.exe",
+        "ProductName": "Camera Connect",
+        "ProductVersion": "2.0.7.202604071812"
+    },
+    "VarFileInfo": {
+        "Translation": { "LangID": "0409", "CharsetID": "04B0" }
+    },
+    "IconPath": "icon.ico",
+    "ManifestPath": ""
+}

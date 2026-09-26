@@ -1,0 +1,41 @@
+/* LN operations dark theme tokens.
+   Activate with data-theme="dark" on html, body, or an app root. */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-primary: #191919;
+  --bg-secondary: #202020;
+  --bg-card: #252525;
+  --bg-elevated: #2e2e2e;
+  --bg-hover: #2f2f2f;
+  --bg-input: #2a2a2a;
+  --bg-sidebar: #1e1e1e;
+
+  --border: #333;
+  --border-hover: #444;
+
+  --text-primary: #e3e3e3;
+  --text-secondary: #9b9b9b;
+  --text-dim: #6b6b6b;
+
+  --accent: #529cca;
+  --accent-hover: #6bb3de;
+  --accent-subtle: #1a3a52;
+
+  --success: #4caf50;
+  --success-bg: #1a2e1a;
+  --warning: #f59e0b;
+  --warning-bg: #2d2206;
+  --danger: #ef5350;
+  --danger-bg: #3b1219;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
+
+  --engine-card-gap: 16px;
+  --engine-card-header-padding: 16px 20px;
+  --engine-card-body-padding: 16px 18px 18px;
+  --engine-card-body-inline: 18px;
+  --engine-card-body-block: 16px;
+}
