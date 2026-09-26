@@ -4,6 +4,7 @@ Sử dụng Windows MTP API để truy cập thẻ nhớ camera
 """
 import logging
 import os
+import time
 from pathlib import Path
 from typing import List, Optional, Dict
 from datetime import datetime
@@ -287,7 +288,14 @@ class MTPHandler:
                     copy_flags = 9748 if overwrite else 16
                     
                     dest_folder.CopyHere(item, copy_flags)
-                    
+
+                    # CopyHere is asynchronous — wait until the destination
+                    # file exists and its size has stopped growing before
+                    # reporting success (prevents truncated uploads/deletes).
+                    if not self._wait_settled(destination_path):
+                        logger.error(f"Download incomplete (settle timeout): {mtp_file.name}")
+                        return False
+
                     logger.info(f"Downloaded: {mtp_file.name} -> {destination_path}")
                     return True
                     
@@ -297,6 +305,32 @@ class MTPHandler:
         except Exception as e:
             logger.error(f"Error downloading file {mtp_file.name}: {e}")
             return False
+
+    def _wait_settled(self, path: Path, timeout_s: int = 600,
+                      interval: float = 0.5, stable_rounds: int = 3) -> bool:
+        """
+        Wait until `path` exists and its size stays unchanged for
+        `stable_rounds` consecutive polls (shell copy finished).
+        Returns False on timeout so callers can retry instead of
+        trusting a partially-written file.
+        """
+        deadline = time.time() + timeout_s
+        last_size, stable = -1, 0
+        while time.time() < deadline:
+            try:
+                if path.exists():
+                    size = path.stat().st_size
+                    if size > 0 and size == last_size:
+                        stable += 1
+                        if stable >= stable_rounds:
+                            return True
+                    else:
+                        stable, last_size = 0, size
+            except OSError:
+                pass
+            time.sleep(interval)
+        logger.warning(f"Settle timeout waiting for {path.name}")
+        return False
 
     def delete_file(self, mtp_file: MTPFile) -> bool:
         """

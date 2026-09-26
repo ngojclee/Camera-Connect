@@ -32,6 +32,9 @@ class CameraSyncCore:
         self.sync_threads: Dict[str, threading.Thread] = {}
         self.running = False
         self.notification_callback = None
+
+        # Files downloaded this run — scoped input for cloud backup (hotfix P0)
+        self._pending_upload = []
         
     def start(self):
         """Start the application"""
@@ -242,9 +245,10 @@ class CameraSyncCore:
         
         if handler.download_file(mtp_file, dest_path, overwrite):
             logger.info(f"✅ Downloaded: {mtp_file.name}")
-            
+
             # Mark as completed in database
             self.queue.mark_completed(mtp_file.path, model_name)
+            self._pending_upload.append(dest_path)
             
             # Check Move Mode
             sync_mode = self.config.get("general.sync_mode")
@@ -473,10 +477,12 @@ class CameraSyncCore:
                              if success:
                                  count += 1
                                  self.queue.mark_completed(f.path, model_name)
+                                 self._pending_upload.append(dest_path)
                                  if delete_after: handler.delete_file(f)
                 handler.disconnect()
             except Exception as e:
                 logger.error(f"Manual Sync failed on {drive}: {e}")
+            self._trigger_backup_if_enabled()
             return count
 
         # Fallback MTP Logic
@@ -499,10 +505,12 @@ class CameraSyncCore:
                         if success:
                             count += 1
                             self.queue.mark_completed(mtp_file.path, model_name)
+                            self._pending_upload.append(dest_path)
                             # MTP Delete logic (risky, maybe disable for now or simple delete)
                             # MTP delete usually just deletes the file.
             finally:
                 handler.disconnect()
+        self._trigger_backup_if_enabled()
         return count
 
     def _show_notification(self, title, message):
@@ -510,9 +518,21 @@ class CameraSyncCore:
             self.notification_callback(title, message)
 
     def _trigger_backup_if_enabled(self):
-        """Trigger one-way cloud backup"""
+        """Trigger one-way cloud backup, scoped to files downloaded this run"""
         dest_base = self.config.get("destination.base_path")
         remote_name = self.config.get("backup.remote_name", "drive")
         remote_path = self.config.get("backup.remote_path", "CameraBackup")
-        
-        self.backup_mgr.run_backup(dest_base, remote_name, remote_path)
+
+        files = None
+        if self._pending_upload:
+            base = Path(dest_base)
+            rels = []
+            for p in self._pending_upload:
+                try:
+                    rels.append(Path(p).relative_to(base).as_posix())
+                except ValueError:
+                    pass  # outside base_path — not backup-scoped
+            files = rels
+            self._pending_upload = []
+
+        self.backup_mgr.run_backup(dest_base, remote_name, remote_path, files=files)

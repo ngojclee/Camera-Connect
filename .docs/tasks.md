@@ -79,3 +79,9 @@
 - Refactored Settings UI for better organization
 - Renamed project components to "Camera Connect"
 - Fixed Rclone config path for portability
+
+
+---
+
+## Go Refactor (2026-09-26)
+New refactor plan + tasks live in [.docs/go-refactor/](./go-refactor/) — see `plan.md` and `task.md` there. Audit findings in [.docs/refactor_plan.md](./refactor_plan.md).
