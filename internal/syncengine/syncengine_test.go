@@ -102,7 +102,7 @@ func TestSyncDevice_CopiesAndSkips(t *testing.T) {
 	var uploaded []string
 	deps := &Deps{
 		Config:        mgr,
-		PendingUpload: func(p string) { uploaded = append(uploaded, p) },
+		PendingUpload: func(_ *config.Profile, rel, staged string) { uploaded = append(uploaded, staged) },
 		Logf:          func(string, ...any) {},
 	}
 
@@ -117,7 +117,8 @@ func TestSyncDevice_CopiesAndSkips(t *testing.T) {
 	if res.Failed != 0 {
 		t.Fatalf("Failed = %d", res.Failed)
 	}
-	if len(res.DestPaths) != 3 || len(uploaded) != 3 {
+	// Backup disabled in test profile → writes go straight to dest, no staging upload.
+	if len(res.DestPaths) != 3 || len(uploaded) != 0 {
 		t.Fatalf("DestPaths=%d uploaded=%d", len(res.DestPaths), len(uploaded))
 	}
 
@@ -133,6 +134,51 @@ func TestSyncDevice_CopiesAndSkips(t *testing.T) {
 	}
 	if res2.Downloaded != 0 || res2.Skipped != 3 {
 		t.Fatalf("second pass: downloaded=%d skipped=%d, want 0/3", res2.Downloaded, res2.Skipped)
+	}
+}
+
+// Backup-enabled profiles write into _staging and enqueue uploads.
+func TestSyncDevice_BackupEnabled_StagesFiles(t *testing.T) {
+	card := makeCard(t)
+	dest := t.TempDir()
+	mgr := makeProfileConfig(t, dest)
+	if err := mgr.UpdateShared(func(s *config.SharedConfig) {
+		s.Profiles[0].Backup = config.BackupConfig{
+			Enabled: true, RemoteName: "gdrive", RemotePath: "CamBackup",
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	dev := detect.Device{ID: "ms:" + card, Model: "Cam", Mode: detect.ModeMassStorage, DriveLetter: card}
+	var staged []string
+	deps := &Deps{
+		Config:        mgr,
+		PendingUpload: func(_ *config.Profile, rel, path string) { staged = append(staged, path) },
+		Logf:          func(string, ...any) {},
+	}
+	res, err := SyncDevice(context.Background(), dev, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Downloaded != 3 || len(staged) != 3 {
+		t.Fatalf("Downloaded=%d staged=%d, want 3/3", res.Downloaded, len(staged))
+	}
+	// Files landed under _staging/<profile>/<destRel>, not in final dest.
+	stagedARW := filepath.Join(dest, "_staging", "p1", "Cam", "2025", "2025-12-26", "DSC0001.ARW")
+	if _, err := os.Stat(stagedARW); err != nil {
+		t.Fatalf("expected staged file %s: %v", stagedARW, err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "Cam", "2025", "2025-12-26", "DSC0001.ARW")); !os.IsNotExist(err) {
+		t.Error("final dest should NOT have file until upload verified")
+	}
+	// Second sync: staged file already exists → skipped, no re-copy.
+	res2, err := SyncDevice(context.Background(), dev, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res2.Downloaded != 0 {
+		t.Fatalf("staged file should be skipped, downloaded=%d", res2.Downloaded)
 	}
 }
 

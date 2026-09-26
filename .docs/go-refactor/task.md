@@ -44,12 +44,14 @@
 - [x] `go build/test/vet` all clean; agent runs WMI portable-device scan without errors
 - [ ] Hardware gate pending owner: ILCE-7RM3 + NEX-5R + ZV-E10 list/download over MTP (needs physical camera)
 
-## Phase 4 — Upload pipeline v2
-- [ ] Staging dir `<base_path>/_staging/<profile>/` (per owner decision) + same-volume finalize move
-- [ ] `internal/backup`: serialized worker over `jobs` table; `rclone copy --files-from` per batch; timeout + backoff; resume-after-restart
-- [ ] Post-upload verify (`rclone check`/`lsjson` size+hash) → move-to-final or delete-local (free-space mode), `--delete-empty-src-dirs` only within staging
-- [ ] UI safety copy for `delete_local_after_upload` (scope explanation + confirm)
-- [ ] Gate: kill app mid-upload → restart → retry completes; large video (≥4GB) verified end-to-end
+## Phase 4 — Upload pipeline v2 ✅ (2026-09-26)
+- [x] Staging route: backup-enabled profiles write `<base>/_staging/<id>/<destRel>` (same volume); syncengine skips camera re-copy when staged copy exists
+- [x] `internal/backup.Worker`: serialized loop over `jobs` table (store.DueJobs → MarkJobRunning/Done/Failed w/ backoff); `rclone copy --files-from` scoped to batch only — never base root; per-job 2h timeout; injectable runner for tests
+- [x] Post-upload verify: `rclone lsjson` size check per file → then `os.Rename` staged→final (or delete when `free_space`); crash-between-verify handled (missing staged + existing final = done); `pruneEmptyDirs` cleans staging
+- [x] `uploadBatcher`: accumulates staged files per profile → one upload job per sync pass (flush on EvtSyncCompleted/Failed); `ReconcileStaging` at startup re-enqueues orphans after crash
+- [x] `retry_backups` IPC → `RequeueJobs` + worker.Wake; `backup_status` lists queue
+- [x] Tests: fake rclone runner — success finalize, free-space delete, failure→retry_wait survival — all pass; `go build/test/vet` clean
+- [ ] Hardware gate pending owner: real rclone.conf + Drive remote; 4GB video kill-mid-upload resume check
 
 ## Phase 5 — AppDB sync + vault
 - [ ] Owner runs SQL migration on appdb.lengoc.me registering slug `camera_connect` (author `012_camera_connect.sql` modeled on LNC-Proxy `004_extension_tables.sql`)

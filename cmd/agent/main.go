@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ngojclee/camera-connect/internal/backup"
 	"github.com/ngojclee/camera-connect/internal/config"
 	"github.com/ngojclee/camera-connect/internal/coordinator"
 	"github.com/ngojclee/camera-connect/internal/detect"
@@ -230,21 +231,38 @@ func main() {
 		})
 	}
 
-	// --- Camera detection watcher (mass storage now; MTP joins Phase 3) ---
-	syncDeps := &syncengine.Deps{
-		Config: cfgMgr,
-		Store:  db,
-		Logf:   log.Printf,
-		PendingUpload: func(destPath string) {
-			if db == nil {
-				return
-			}
-			payload := fmt.Sprintf(`{"files":[%q]}`, destPath)
-			if _, err := db.EnqueueJob(context.Background(), store.KindUpload, payload); err != nil {
-				log.Printf("[WARN] enqueue upload job failed: %v", err)
-			}
-		},
+	// --- Upload worker (rclone, serialized over jobs table) ---
+	uploadWorker := backup.NewWorker(db, cfgMgr, backup.Options{
+		Logf: log.Printf,
+	})
+	if uploadWorker != nil {
+		startManaged(ctx, &wg, "upload-worker", func(ctx context.Context) {
+			uploadWorker.Run(ctx)
+		})
 	}
+
+	// --- Camera detection watcher + batch-aware upload enqueue ---
+	batcher := newUploadBatcher(cfgMgr, db, uploadWorker)
+	syncDeps := &syncengine.Deps{
+		Config:        cfgMgr,
+		Store:         db,
+		Logf:          log.Printf,
+		PendingUpload: batcher.Add,
+	}
+	// Flush pending staged files into upload jobs after each sync pass.
+	eventBus.On(coordinator.EvtSyncCompleted, func(evt coordinator.InternalEvent) {
+		batcher.Flush(context.Background())
+	})
+	eventBus.On(coordinator.EvtSyncFailed, func(evt coordinator.InternalEvent) {
+		batcher.Flush(context.Background())
+	})
+	// Orphaned staged files (crash before flush) → reconcile at startup.
+	go func() {
+		time.Sleep(3 * time.Second)
+		if n := batcher.ReconcileStaging(context.Background()); n > 0 {
+			log.Printf("[INFO] reconciled %d orphaned staged file(s) into upload queue", n)
+		}
+	}()
 	deviceLoops := newDeviceLoopManager(syncWorker, syncDeps, appState, eventBus, cfgMgr)
 	watcher := detect.NewWatcher(2*time.Second, detect.Hooks{
 		OnConnect: func(dev detect.Device) {
@@ -312,6 +330,8 @@ func main() {
 			watcher:       watcher,
 			deviceLoops:   deviceLoops,
 			syncDeps:      syncDeps,
+			uploadWorker:  uploadWorker,
+			batcher:       batcher,
 			shutdownCh:    shutdownCh,
 			updateChecker: updateChecker,
 			updateMu:      &updateMu,
@@ -379,6 +399,8 @@ type agentDeps struct {
 	watcher       *detect.Watcher
 	deviceLoops   *deviceLoopManager
 	syncDeps      *syncengine.Deps
+	uploadWorker  *backup.Worker
+	batcher       *uploadBatcher
 	shutdownCh    chan struct{}
 	updateChecker *updatepkg.Checker
 	updateMu      *sync.Mutex
@@ -528,8 +550,17 @@ func dispatchCommand(reqCtx context.Context, req ipc.Request, d *agentDeps) ipc.
 		return ipc.Response{Success: true, Data: result, Code: ipc.CodeOK}
 
 	case ipc.CmdRetryBackups:
-		// Phase 4 wires the upload worker; for now just report queue depth.
-		return ipc.Response{Success: true, Data: map[string]string{"status": "queued"}, Code: ipc.CodeOK}
+		if d.db == nil {
+			return ipc.Response{Success: false, Error: "store unavailable", Code: ipc.CodeInternalError}
+		}
+		n, err := d.db.RequeueJobs(reqCtx, store.KindUpload)
+		if err != nil {
+			return ipc.Response{Success: false, Error: err.Error(), Code: ipc.CodeInternalError}
+		}
+		if d.uploadWorker != nil {
+			d.uploadWorker.Wake()
+		}
+		return ipc.Response{Success: true, Data: map[string]string{"requeued": fmt.Sprintf("%d", n)}, Code: ipc.CodeOK}
 
 	case ipc.CmdCheckUpdate:
 		releaseInfo, err := d.updateChecker.CheckLatest(reqCtx, Version)
@@ -761,6 +792,126 @@ func driveSuffix(dev detect.Device) string {
 		return ", " + dev.DriveLetter
 	}
 	return ""
+}
+
+// ---------- upload batching ----------
+
+// uploadBatcher accumulates staged files per profile during a sync pass and
+// flushes them into single upload jobs (one rclone invocation per batch).
+type uploadBatcher struct {
+	mu      sync.Mutex
+	pending map[string][]string // profileID → staged rel paths
+	cfgMgr  *config.Manager
+	db      *store.Store
+	worker  *backup.Worker
+}
+
+func newUploadBatcher(cfgMgr *config.Manager, db *store.Store, worker *backup.Worker) *uploadBatcher {
+	return &uploadBatcher{pending: map[string][]string{}, cfgMgr: cfgMgr, db: db, worker: worker}
+}
+
+// Add records a staged file for the next flush.
+func (b *uploadBatcher) Add(profile *config.Profile, destRel, _ string) {
+	if b == nil || b.db == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.pending[profile.ID] = append(b.pending[profile.ID], filepath.ToSlash(destRel))
+}
+
+// Flush enqueues one upload job per profile with accumulated files.
+func (b *uploadBatcher) Flush(ctx context.Context) {
+	if b == nil || b.db == nil {
+		return
+	}
+	b.mu.Lock()
+	batches := b.pending
+	b.pending = map[string][]string{}
+	b.mu.Unlock()
+
+	for profileID, files := range batches {
+		if len(files) == 0 {
+			continue
+		}
+		p := b.cfgMgr.ProfileByID(profileID)
+		if p == nil {
+			continue
+		}
+		basePath := b.cfgMgr.ResolvedBasePath(profileID)
+		payload, err := json.Marshal(backup.UploadJobPayload{
+			ProfileID:  profileID,
+			Remote:     p.Backup.RemoteName,
+			RemotePath: p.Backup.RemotePath,
+			FreeSpace:  p.Backup.FreeSpace,
+			Files:      files,
+			StagingDir: backup.StagingDir(basePath, profileID),
+			BasePath:   basePath,
+		})
+		if err != nil {
+			continue
+		}
+		if _, err := b.db.EnqueueJob(ctx, store.KindUpload, string(payload)); err != nil {
+			log.Printf("[WARN] enqueue upload job failed: %v", err)
+		}
+	}
+	if b.worker != nil && len(batches) > 0 {
+		b.worker.Wake()
+	}
+}
+
+// ReconcileStaging scans _staging dirs for files left by a crash and
+// enqueues upload jobs for them (files were verified-copied, not yet uploaded).
+func (b *uploadBatcher) ReconcileStaging(ctx context.Context) int {
+	if b == nil || b.db == nil {
+		return 0
+	}
+	count := 0
+	shared := b.cfgMgr.Shared()
+	for _, p := range shared.Profiles {
+		if !p.Backup.Enabled || strings.TrimSpace(p.Backup.RemoteName) == "" {
+			continue
+		}
+		basePath := b.cfgMgr.ResolvedBasePath(p.ID)
+		if basePath == "" {
+			continue
+		}
+		staging := backup.StagingDir(basePath, p.ID)
+		var files []string
+		_ = filepath.Walk(staging, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil
+			}
+			rel, err := filepath.Rel(staging, path)
+			if err == nil {
+				files = append(files, filepath.ToSlash(rel))
+				count++
+			}
+			return nil
+		})
+		if len(files) == 0 {
+			continue
+		}
+		payload, err := json.Marshal(backup.UploadJobPayload{
+			ProfileID:  p.ID,
+			Remote:     p.Backup.RemoteName,
+			RemotePath: p.Backup.RemotePath,
+			FreeSpace:  p.Backup.FreeSpace,
+			Files:      files,
+			StagingDir: staging,
+			BasePath:   basePath,
+		})
+		if err != nil {
+			continue
+		}
+		if _, err := b.db.EnqueueJob(ctx, store.KindUpload, string(payload)); err != nil {
+			log.Printf("[WARN] reconcile enqueue failed for %s: %v", p.ID, err)
+		}
+	}
+	if b.worker != nil && count > 0 {
+		b.worker.Wake()
+	}
+	return count
 }
 
 func hostNameOrUnknown() string {

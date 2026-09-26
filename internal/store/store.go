@@ -155,11 +155,13 @@ ORDER BY id`, JobPending, JobRetryWait, now.UTC().Format(time.RFC3339))
 	var out []Job
 	for rows.Next() {
 		var j Job
-		var nr string
-		if err := rows.Scan(&j.ID, &j.Kind, &j.Payload, &j.State, &j.Attempts, &nr, &j.LastError, &j.CreatedAt, &j.UpdatedAt); err != nil {
+		var nr, created, updated string
+		if err := rows.Scan(&j.ID, &j.Kind, &j.Payload, &j.State, &j.Attempts, &nr, &j.LastError, &created, &updated); err != nil {
 			return nil, err
 		}
 		j.NextRetry, _ = time.Parse(time.RFC3339, nr)
+		j.CreatedAt, _ = time.Parse(time.RFC3339, created)
+		j.UpdatedAt, _ = time.Parse(time.RFC3339, updated)
 		out = append(out, j)
 	}
 	return out, rows.Err()
@@ -195,6 +197,17 @@ WHERE id=?`,
 // backoffFor is a placeholder until attempts-aware backoff is needed;
 // fixed 5-minute retry keeps it simple and predictable.
 func backoffFor(_ int64) time.Duration { return 5 * time.Minute }
+
+// RequeueJobs forces all retry_wait/failed jobs back to pending now.
+func (s *Store) RequeueJobs(ctx context.Context, kind string) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE jobs SET state=?, next_retry='', updated_at=? WHERE kind=? AND state IN (?, ?)`,
+		JobPending, time.Now().UTC().Format(time.RFC3339), kind, JobRetryWait, JobFailed)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
 
 // JobCounts returns (pendingOrWaiting, running, failed-ish) for UI badges.
 func (s *Store) JobCounts(ctx context.Context) (pending int, failed int, err error) {
