@@ -56,6 +56,13 @@ func ScanPortableDevices(ctx context.Context) ([]PortableDevice, error) {
 		if strings.TrimSpace(d.DeviceID) == "" {
 			continue
 		}
+		// Skip mass-storage disks exposed through the WPD filesystem driver —
+		// they carry USBSTOR in the device path and already show up as drives.
+		// Real MTP cameras enumerate under USB\VID_* without a DISK device.
+		upper := strings.ToUpper(d.DeviceID)
+		if strings.Contains(upper, "USBSTOR") || strings.Contains(upper, "#DISK&") {
+			continue
+		}
 		model := strings.TrimSpace(d.Name)
 		if model == "" {
 			model = brandFromDeviceID(d.DeviceID)

@@ -287,4 +287,23 @@ type SaveConfigPayload struct {
 	NotifyOnConnect   *bool   `json:"notify_on_connect,omitempty"`
 	NotifyOnComplete  *string `json:"notify_on_complete,omitempty"`
 	ActiveProfile     *string `json:"active_profile,omitempty"`
+	// Full-replacement fields (UI sends the whole list/map when editing).
+	Profiles       *[]Profile         `json:"profiles,omitempty"`
+	ProfilePaths   *map[string]string `json:"profile_paths,omitempty"`
+	FileTypePhotos *[]string          `json:"file_type_photos,omitempty"`
+	FileTypeVideos *[]string          `json:"file_type_videos,omitempty"`
+}
+
+// Profile mirrors config.Profile for IPC payloads.
+type Profile struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	PhotoTemplate string `json:"photo_template"`
+	VideoTemplate string `json:"video_template"`
+	Backup        struct {
+		Enabled    bool   `json:"enabled"`
+		RemoteName string `json:"remote_name"`
+		RemotePath string `json:"remote_path"`
+		FreeSpace  bool   `json:"free_space"`
+	} `json:"backup"`
 }

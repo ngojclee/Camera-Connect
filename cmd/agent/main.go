@@ -1069,7 +1069,7 @@ func applyConfigPatch(m *config.Manager, patch ipc.SaveConfigPayload) error {
 			return errors.New("notify_on_complete must be 'each', 'batch', or 'off'")
 		}
 	}
-	return m.UpdateShared(func(s *config.SharedConfig) {
+	if err := m.UpdateShared(func(s *config.SharedConfig) {
 		if patch.ScanMode != nil {
 			s.General.ScanMode = *patch.ScanMode
 		}
@@ -1103,14 +1103,55 @@ func applyConfigPatch(m *config.Manager, patch ipc.SaveConfigPayload) error {
 		if patch.ActiveProfile != nil {
 			s.ActiveProfile = strings.TrimSpace(*patch.ActiveProfile)
 		}
-	})
+		if patch.FileTypePhotos != nil {
+			s.FileTypes.Photos = *patch.FileTypePhotos
+		}
+		if patch.FileTypeVideos != nil {
+			s.FileTypes.Videos = *patch.FileTypeVideos
+		}
+		if patch.Profiles != nil {
+			s.Profiles = make([]config.Profile, 0, len(*patch.Profiles))
+			for _, p := range *patch.Profiles {
+				if strings.TrimSpace(p.ID) == "" {
+					continue
+				}
+				cp := config.Profile{
+					ID:            p.ID,
+					Name:          p.Name,
+					PhotoTemplate: p.PhotoTemplate,
+					VideoTemplate: p.VideoTemplate,
+				}
+				cp.Backup.Enabled = p.Backup.Enabled
+				cp.Backup.RemoteName = p.Backup.RemoteName
+				cp.Backup.RemotePath = p.Backup.RemotePath
+				cp.Backup.FreeSpace = p.Backup.FreeSpace
+				s.Profiles = append(s.Profiles, cp)
+			}
+		}
+	}); err != nil {
+		return err
+	}
+	// Local (per-machine) fields.
+	if patch.ProfilePaths != nil {
+		return m.UpdateLocal(func(l *config.LocalConfig) {
+			if l.ProfilePaths == nil {
+				l.ProfilePaths = map[string]string{}
+			}
+			for k, v := range *patch.ProfilePaths {
+				l.ProfilePaths[k] = v
+			}
+		})
+	}
+	return nil
 }
 
 func isEmptyConfigPatch(p ipc.SaveConfigPayload) bool {
 	return p.ScanMode == nil && p.PollInterval == nil && p.SyncMode == nil &&
 		p.OverwriteExisting == nil && p.AutoSync == nil &&
 		p.StartWithWindows == nil && p.StartMinimized == nil && p.MinimizeToTray == nil &&
-		p.NotifyOnConnect == nil && p.NotifyOnComplete == nil && p.ActiveProfile == nil
+		p.NotifyOnConnect == nil && p.NotifyOnComplete == nil && p.ActiveProfile == nil &&
+		p.Profiles == nil && p.ProfilePaths == nil &&
+		p.FileTypePhotos == nil && p.FileTypeVideos == nil
 }
 
 func decodePayload[T any](raw any) (T, error) {
