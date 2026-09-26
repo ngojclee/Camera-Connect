@@ -19,15 +19,23 @@ type PortableDevice struct {
 }
 
 // cameraVIDs maps USB vendor IDs to brand names (multi-brand detection).
+// cameraVIDs maps USB vendor IDs to brand names (multi-brand detection).
+// Detection itself does NOT depend on this table — any WPD/PortableDevice
+// is accepted; VIDs only improve the display name. Sources: usb.ids,
+// libmtp device database.
 var cameraVIDs = map[string]string{
 	"054C": "Sony",
 	"04A9": "Canon",
 	"04B0": "Nikon",
 	"04CB": "Fujifilm",
 	"04DA": "Panasonic",
-	"07B4": "Olympus",
+	"07B4": "OM System", // Olympus rebrand — same VID
 	"2672": "GoPro",
 	"2CA3": "DJI",
+	"1A98": "Leica",
+	"25FB": "Ricoh", // covers Pentax
+	"1003": "Sigma",
+	"040A": "Kodak",
 	"041E": "Creative",
 	"0FAD": "Blackmagic",
 }
