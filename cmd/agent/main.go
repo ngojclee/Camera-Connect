@@ -239,6 +239,9 @@ func main() {
 	// --- Upload worker (rclone, serialized over jobs table) ---
 	uploadWorker := backup.NewWorker(db, cfgMgr, backup.Options{
 		Logf: log.Printf,
+		// Vault-sealed rclone.conf lives in secrets\ — vault-pull writes it
+		// here; worker falls back to rclone's default conf when absent.
+		RcloneConf: filepath.Join(cfgMgr.SecretsDir(), "rclone.conf"),
 	})
 	if uploadWorker != nil {
 		startManaged(ctx, &wg, "upload-worker", func(ctx context.Context) {

@@ -306,6 +306,12 @@ func (w *Worker) confArgs(args []string) []string {
 	if conf == "" {
 		return args
 	}
+	// Fall back to rclone's default config when the vault file hasn't been
+	// pulled yet — an explicit --config pointing at a missing file would
+	// break remotes that exist in the default location.
+	if _, err := os.Stat(conf); err != nil {
+		return args
+	}
 	return append(args, "--config", conf)
 }
 
