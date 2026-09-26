@@ -187,6 +187,13 @@ func (s *AppState) SetLastBackup(info string) {
 	s.lastBackup = info
 }
 
+// LastBackup returns the last successful backup timestamp string.
+func (s *AppState) LastBackup() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastBackup
+}
+
 func (s *AppState) AddFilesSynced(n int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

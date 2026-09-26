@@ -22,7 +22,7 @@ interface ConfigSnap {
   sync_enabled?: boolean; sync_logged_in?: boolean;
 }
 interface JobInfo { id: number; kind: string; state: string; payload: string; attempts: number; last_error?: string }
-interface BackupStatus { staging_dir: string; pending_files: number; jobs: JobInfo[]; last_run?: string; last_error?: string }
+interface BackupStatus { staging_dir: string; pending_files: number; total_size?: number; jobs: JobInfo[]; last_run?: string; last_error?: string }
 interface AppDBStatus { enabled: boolean; logged_in: boolean; email?: string; device_label?: string; last_sync_at?: string }
 interface FileRec { camera_path: string; camera: string; profile: string; size: number; dest: string; synced_at: string }
 interface UpdateInfo { current_version: string; latest_version: string; has_update: boolean; release_notes?: string; release_url?: string; asset_url?: string; asset_name?: string; download_in_progress: boolean }
@@ -50,6 +50,7 @@ const state: {
   logCursor: number; logLevel: string;
   editingProfile?: string; notice?: string;
   importProfile?: string; // manual-import target — independent of active profile
+  histCam?: string; histProfile?: string; histQ?: string;
 } = { panel: "dashboard", history: [], logs: [], logCursor: 0, logLevel: "ALL" };
 
 const app = document.getElementById("app")!;
@@ -217,6 +218,7 @@ function panelBackup(): string {
     <h3>Upload Queue</h3>
     <div class="cc-row">
       ${badge(b?.pending_files ? "orange" : "green", `${b?.pending_files ?? 0} staged file(s)`)}
+      ${b?.pending_files ? badge("blue", fmtSize(b?.total_size ?? 0)) : ""}
       ${b?.last_error ? badge("red", esc(b.last_error)) : ""}
       <span class="cc-spacer"></span>
       <button class="cc-btn" id="btn-retry"><span class="material-symbols-outlined">replay</span>Retry failed</button>
@@ -226,8 +228,8 @@ function panelBackup(): string {
   <div class="cc-card">
     <h3>Jobs</h3>
     ${(b?.jobs ?? []).length === 0 ? `<div class="cc-empty">Queue empty — uploads run automatically after each sync when backup is enabled.</div>` : ""}
-    <table class="cc-table"><thead><tr><th>#</th><th>State</th><th>Attempts</th><th>Error</th></tr></thead>
-    <tbody>${(b?.jobs ?? []).map(j => `<tr><td>${j.id}</td><td>${badge(j.state === "failed" ? "red" : j.state === "running" ? "blue" : "orange", j.state)}</td><td>${j.attempts}</td><td class="cc-muted">${esc(j.last_error || "")}</td></tr>`).join("")}</tbody></table>
+    <table class="cc-table"><thead><tr><th>#</th><th>State</th><th>Files</th><th>Remote</th><th>Attempts</th><th>Error</th></tr></thead>
+    <tbody>${(b?.jobs ?? []).map(j => { let p: any = {}; try { p = JSON.parse(j.payload || "{}"); } catch { /* malformed */ } return `<tr><td>${j.id}</td><td>${badge(j.state === "failed" ? "red" : j.state === "running" ? "blue" : "orange", j.state)}</td><td>${(p.files ?? []).length}</td><td class="cc-muted">${esc((p.remote ?? "") + ":" + (p.remote_path ?? ""))}</td><td>${j.attempts}</td><td class="cc-muted">${esc(j.last_error || "")}</td></tr>`; }).join("")}</tbody></table>
   </div>`;
 }
 
@@ -266,13 +268,24 @@ function panelSync(): string {
 }
 
 function panelHistory(): string {
-  const rows = state.history;
+  const cams = [...new Set(state.history.map(r => r.camera))].sort();
+  const profs = [...new Set(state.history.map(r => r.profile))].sort();
+  const q = (state.histQ ?? "").toLowerCase();
+  const rows = state.history.filter(r =>
+    (!state.histCam || r.camera === state.histCam) &&
+    (!state.histProfile || r.profile === state.histProfile) &&
+    (!q || r.camera_path.toLowerCase().includes(q) || r.dest.toLowerCase().includes(q)));
   return `
   <div class="cc-card">
-    <h3>Synced Files <span class="cc-muted">(${rows.length} most recent)</span></h3>
-    ${rows.length === 0 ? `<div class="cc-empty">Nothing synced yet.</div>` : ""}
-    ${rows.length ? `<table class="cc-table"><thead><tr><th>File</th><th>Camera</th><th>Size</th><th>Destination</th><th>Synced</th></tr></thead>
-    <tbody>${rows.map(r => `<tr><td>${esc(r.camera_path.split("/").pop() ?? r.camera_path)}</td><td>${esc(r.camera)}</td><td>${fmtSize(r.size)}</td><td class="cc-muted">${esc(r.dest)}</td><td class="cc-muted">${esc(fmtTime(r.synced_at))}</td></tr>`).join("")}</tbody></table>` : ""}
+    <h3>Synced Files <span class="cc-muted">(${rows.length}/${state.history.length})</span></h3>
+    <div class="cc-row" style="margin:8px 0">
+      <select class="cc-select" id="hf-cam"><option value="">All cameras</option>${cams.map(c => `<option ${c === state.histCam ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
+      <select class="cc-select" id="hf-prof"><option value="">All profiles</option>${profs.map(p => `<option ${p === state.histProfile ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>
+      <input class="cc-input" id="hf-q" placeholder="Search file/path…" value="${esc(state.histQ ?? "")}" style="flex:1;min-width:140px"/>
+    </div>
+    ${rows.length === 0 ? `<div class="cc-empty">${state.history.length === 0 ? "Nothing synced yet." : "No matches."}</div>` : ""}
+    ${rows.length ? `<table class="cc-table"><thead><tr><th>File</th><th>Camera</th><th>Profile</th><th>Size</th><th>Destination</th><th>Synced</th></tr></thead>
+    <tbody>${rows.map(r => `<tr><td>${esc(r.camera_path.split("/").pop() ?? r.camera_path)}</td><td>${esc(r.camera)}</td><td class="cc-muted">${esc(r.profile)}</td><td>${fmtSize(r.size)}</td><td class="cc-muted">${esc(r.dest)}</td><td class="cc-muted">${esc(fmtTime(r.synced_at))}</td></tr>`).join("")}</tbody></table>` : ""}
   </div>`;
 }
 
@@ -515,6 +528,11 @@ function wire(): void {
     clearDrafts("vault-");
     toast(r.ok ? "rclone.conf pulled + written" : (r.error ?? "pull failed"));
   });
+
+  // history filters — no IPC needed, filters are client-side over loaded rows
+  document.getElementById("hf-cam")?.addEventListener("change", e => { state.histCam = (e.target as HTMLSelectElement).value || undefined; render(); });
+  document.getElementById("hf-prof")?.addEventListener("change", e => { state.histProfile = (e.target as HTMLSelectElement).value || undefined; render(); });
+  document.getElementById("hf-q")?.addEventListener("input", e => { state.histQ = (e.target as HTMLInputElement).value; render(); });
 
   // logs
   document.getElementById("log-level")?.addEventListener("change", e => { state.logLevel = (e.target as HTMLSelectElement).value; });

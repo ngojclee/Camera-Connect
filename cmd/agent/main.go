@@ -577,6 +577,23 @@ func dispatchCommand(reqCtx context.Context, req ipc.Request, d *agentDeps) ipc.
 
 	case ipc.CmdBackupStatus:
 		result := ipc.BackupStatusResult{}
+		for _, p := range d.cfgMgr.Shared().Profiles {
+			if !p.Backup.Enabled || strings.TrimSpace(p.Backup.RemoteName) == "" {
+				continue
+			}
+			staging := backup.StagingDir(d.cfgMgr.ResolvedBasePath(p.ID), p.ID)
+			if result.StagingDir == "" {
+				result.StagingDir = staging
+			}
+			_ = filepath.Walk(staging, func(_ string, info os.FileInfo, err error) error {
+				if err == nil && !info.IsDir() {
+					result.PendingFiles++
+					result.TotalSize += info.Size()
+				}
+				return nil
+			})
+		}
+		result.LastRun = d.appState.LastBackup()
 		if d.db != nil {
 			jobs, err := d.db.DueJobs(reqCtx, time.Now().Add(24*time.Hour)) // show all incl. scheduled retries
 			if err == nil {
@@ -585,6 +602,9 @@ func dispatchCommand(reqCtx context.Context, req ipc.Request, d *agentDeps) ipc.
 						ID: j.ID, Kind: j.Kind, State: j.State, Payload: j.Payload,
 						Attempts: j.Attempts, LastError: j.LastError,
 					})
+					if j.State == store.JobFailed && result.LastError == "" {
+						result.LastError = j.LastError
+					}
 				}
 			}
 		}

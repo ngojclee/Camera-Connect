@@ -228,6 +228,7 @@ type SetProfilePayload struct {
 type BackupStatusResult struct {
 	StagingDir   string    `json:"staging_dir"`
 	PendingFiles int       `json:"pending_files"`
+	TotalSize    int64     `json:"total_size"`
 	Jobs         []JobInfo `json:"jobs"`
 	LastRun      string    `json:"last_run,omitempty"`
 	LastError    string    `json:"last_error,omitempty"`
