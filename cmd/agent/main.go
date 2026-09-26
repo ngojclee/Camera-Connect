@@ -577,6 +577,16 @@ func dispatchCommand(reqCtx context.Context, req ipc.Request, d *agentDeps) ipc.
 		}
 		return ipc.Response{Success: true, Data: map[string]string{"requeued": fmt.Sprintf("%d", n)}, Code: ipc.CodeOK}
 
+	case ipc.CmdListHistory:
+		if d.db == nil {
+			return ipc.Response{Success: true, Data: []store.FileRecord{}, Code: ipc.CodeOK}
+		}
+		files, err := d.db.ListFiles(reqCtx, 300)
+		if err != nil {
+			return ipc.Response{Success: false, Error: err.Error(), Code: ipc.CodeInternalError}
+		}
+		return ipc.Response{Success: true, Data: files, Code: ipc.CodeOK}
+
 	case ipc.CmdCheckUpdate:
 		releaseInfo, err := d.updateChecker.CheckLatest(reqCtx, Version)
 		if err != nil {

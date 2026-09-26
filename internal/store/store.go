@@ -126,6 +126,39 @@ func (s *Store) FileCount(ctx context.Context) (int, error) {
 	return n, err
 }
 
+// FileRecord is one synced-file history row for the UI.
+type FileRecord struct {
+	CameraPath string `json:"camera_path"`
+	Camera     string `json:"camera"`
+	Profile    string `json:"profile"`
+	Size       int64  `json:"size"`
+	Dest       string `json:"dest"`
+	SyncedAt   string `json:"synced_at"`
+}
+
+// ListFiles returns the most recent synced files (newest first).
+func (s *Store) ListFiles(ctx context.Context, limit int) ([]FileRecord, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT camera_path, camera, profile, size, dest, synced_at
+FROM files ORDER BY synced_at DESC, id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []FileRecord{}
+	for rows.Next() {
+		var r FileRecord
+		if err := rows.Scan(&r.CameraPath, &r.Camera, &r.Profile, &r.Size, &r.Dest, &r.SyncedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // ---------- Jobs (durable retry queue) ----------
 
 // EnqueueJob inserts a pending job and returns its ID.

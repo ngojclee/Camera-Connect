@@ -136,6 +136,11 @@ func (s *Service) RetryBackups() ActionEnvelope {
 	return s.envelope(ipc.CmdRetryBackups, nil, 5*time.Second)
 }
 
+// ListHistory returns recent synced-file records.
+func (s *Service) ListHistory(limit int) ActionEnvelope {
+	return s.envelope(ipc.CmdListHistory, map[string]int{"limit": limit}, 3*time.Second)
+}
+
 // CheckUpdate asks the Agent to check GitHub releases.
 func (s *Service) CheckUpdate() ActionEnvelope {
 	return s.envelope(ipc.CmdCheckUpdate, nil, 30*time.Second)
@@ -209,9 +214,23 @@ func (s *Service) ExecuteAction(action, payload string) ActionEnvelope {
 	case "scan-now", "sync-now":
 		return s.ScanNow(payload)
 	case "set-profile":
-		return s.SetProfile(payload)
+		var p ipc.SetProfilePayload
+		if err := json.Unmarshal([]byte(payload), &p); err == nil && p.ProfileID != "" {
+			return s.SetProfile(p.ProfileID)
+		}
+		return s.SetProfile(payload) // bare profile id
+	case "list-history", "history":
+		var p struct {
+			Limit int `json:"limit"`
+		}
+		_ = json.Unmarshal([]byte(payload), &p)
+		return s.ListHistory(p.Limit)
 	case "subscribe-logs", "logs":
-		return s.SubscribeLogs(0, 200, "")
+		var p ipc.SubscribeLogsPayload
+		if err := json.Unmarshal([]byte(payload), &p); err != nil || p.AfterID == 0 && p.Limit == 0 && p.Level == "" {
+			return s.SubscribeLogs(0, 200, "")
+		}
+		return s.SubscribeLogs(p.AfterID, p.Limit, p.Level)
 	case "pause-sync":
 		return s.PauseSync()
 	case "resume-sync":

@@ -28,6 +28,7 @@ const (
 	CmdImportDates    CommandType = "import_dates"
 	CmdBackupStatus   CommandType = "backup_status"
 	CmdRetryBackups   CommandType = "retry_backups"
+	CmdListHistory    CommandType = "list_history"
 	CmdSubscribeLogs  CommandType = "subscribe_logs"
 	CmdPauseSync      CommandType = "pause_sync"
 	CmdResumeSync     CommandType = "resume_sync"

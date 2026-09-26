@@ -54,11 +54,18 @@ func main() {
 	}
 	defer guard.Release()
 
-	// Wait briefly for agent, but don't fail if we can't reach it. The UI can show a "disconnected" state.
+	// Wait briefly for agent; if unreachable, spawn it ourselves so the UI
+	// always comes up against a live backend.
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), 2200*time.Millisecond)
 	defer cancelWait()
 	if err := ipc.WaitForAgent(waitCtx, *pipeName, 150*time.Millisecond); err != nil {
-		log.Printf("[WARN] Agent not reachable at startup: %v", err)
+		log.Printf("[INFO] Agent not running — launching it")
+		res := NewWailsApp(*pipeName).LaunchAgent()
+		if res["ok"] != "true" {
+			log.Printf("[WARN] Agent launch failed: %v", res["error"])
+		} else {
+			log.Printf("[INFO] Agent started (pid=%s)", res["agent_pid"])
+		}
 	} else {
 		log.Println("[INFO] Agent reachable.")
 	}
