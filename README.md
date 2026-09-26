@@ -1,119 +1,72 @@
-# Sony Camera Auto-Sync
+# Camera Connect
 
-Ứng dụng Windows tự động đồng bộ ảnh/video từ máy ảnh Sony về PC.
+Tự động đồng bộ ảnh/video từ máy ảnh về PC — hỗ trợ cả **USB Mass Storage** (thẻ nhớ) và **MTP** (camera qua USB). Background agent + desktop UI, cloud backup qua rclone, đồng bộ cấu hình giữa nhiều máy.
 
-## Tính năng
+*Auto-import photos & videos from your camera — works with both mass-storage card readers and MTP devices (Sony, Canon, Nikon, Fujifilm, Panasonic, OM System, GoPro, DJI…).*
 
-✅ **Auto-Detection**: Tự động nhận diện máy ảnh Sony khi cắm USB (NEX-5R, ZV-E10, A7R III, ...)  
-✅ **Auto-Sync**: Tự động copy ảnh/video mới về PC  
-✅ **Folder Templates**: Tùy chỉnh cấu trúc thư mục đích với placeholders `{camera}`, `{year}`, `{month}`, `{day}`  
-✅ **Notifications**: Thông báo khi camera kết nối và khi sync xong  
-✅ **Background Service**: Chạy ngầm, tự động wake up khi phát hiện camera  
-✅ **Smart Queue**: SQLite database track files đã sync, tránh duplicate  
+## Features
 
-## Cài đặt
+- **Auto-detect** — plug in camera/SD card → sync starts (mass storage preferred, MTP fallback)
+- **Profiles** — per-workflow destinations + folder templates (`{camera}/{yyyy}/{yyyy}-{mm}-{dd}`…), machine-specific path overrides
+- **Crash-safe copies** — `.part` + fsync + rename; MTP waits for transfer to settle before reporting done
+- **Idempotent** — existing files skipped (unique camera file names), no re-copying, no overwrite popups
+- **Cloud backup** — staged upload via rclone (`--files-from` scoped to the batch), verified with `lsjson` before files leave staging
+- **AppDB sync** *(optional)* — sign in once on any machine to pull profiles + your encrypted `rclone.conf` vault (AES-256-GCM, sealed client-side)
+- **Self-update** — in-app update checks against GitHub releases
 
-### 1. Cài đặt Python dependencies
+## Install
 
-```bash
-pip install -r requirements.txt
+Download `CameraConnectSetup-vX.Y.Z.K-windows-amd64.exe` from [Releases](https://github.com/ngojclee/camera-connect/releases), or build from source:
+
+```powershell
+# prerequisites: Go 1.22+, Node 20+
+./scripts/build_windows.ps1 -Version 3.0.0.1
+# outputs: build/bin/CameraConnect.exe (UI) + CameraConnectAgent.exe
 ```
 
-### 2. Cấu hình
+The installer adds the agent to Windows startup and registers single-instance behavior. Config lives in `%LOCALAPPDATA%\CameraConnect\` — `config.yaml` (shared, syncable) + `config.local.yaml` (machine paths, never synced).
 
-Chỉnh sửa file config (tên dựa theo executable, ví dụ: `CameraConnectConfig.yaml`):
+## CLI (useful while debugging)
+
+```powershell
+CameraConnect.exe --action get-status
+CameraConnect.exe --action list-cameras
+CameraConnect.exe --action scan-now            # force a sync pass
+CameraConnect.exe --action set-profile --payload '{"profile_id":"studio"}'
+CameraConnect.exe --action subscribe-logs
+```
+
+## Configuration
 
 ```yaml
-destination:
-  base_path: "D:/Photos"  # Thư mục đích
-  folder_template: "{camera}/{year}/{month}-{day}"  # Template
-
-notifications:
-  on_camera_connect: true
-  on_copy_complete: "batch"  # "each" hoặc "batch"
+# config.yaml — shared between machines
+active_profile: default
+profiles:
+  - id: default
+    name: Default
+    photo_template: "{camera}/{yyyy}/{yyyy}-{mm}-{dd}"
+    backup:
+      enabled: true
+      remote_name: gdrive
+      remote_path: Backup/Photos
+general:
+  scan_mode: once          # once | continuous
+  sync_mode: copy          # copy | move (move = mass storage only)
+  auto_sync: true
 ```
 
-### 3. Chạy ứng dụng
-
-```bash
-python src/main.py
+```yaml
+# config.local.yaml — this machine only
+profile_paths:
+  default: D:/Photos/Incoming
 ```
 
-## Hướng dẫn sử dụng
+## Security notes
 
-1. **Cắm máy ảnh Sony vào PC qua USB**
-2. **Set camera sang chế độ MTP** (hoặc Mass Storage)
-   - Trên camera: Menu → Setup → USB Connection → MTP
-3. **App sẽ tự động:**
-   - Nhận diện camera
-   - Quét thư mục DCIM
-   - Copy files mới về thư mục đích
-   - Hiển thị notification khi xong
-
-## Folder Template Placeholders
-
-| Placeholder | Ví dụ | Mô tả |
-|-------------|-------|-------|
-| `{camera}` | ZV-E10 | Tên model camera |
-| `{type}` | Photo / Video | Loại file |
-| `{yyyy}` | 2025 | Năm (4 chữ số) |
-| `{yy}` | 25 | Năm (2 chữ số) |
-| `{mm}` | 01-12 | Tháng (2 chữ số, có leading zero) |
-| `{m}` | 1-12 | Tháng (1-2 chữ số, không leading zero) |
-| `{dd}` | 01-31 | Ngày (2 chữ số, có leading zero) |
-| `{d}` | 1-31 | Ngày (1-2 chữ số, không leading zero) |
-| `{date}` | 2025-12-25 | Ngày đầy đủ YYYY-MM-DD |
-
-**Ví dụ:**
-- `{camera}/{yyyy}/{mm}-{dd}` → `D:/Photos/ZV-E10/2025/12-25/DSC00001.ARW`
-- `{yyyy}-{mm}-{dd}` → `D:/Photos/2025-12-25/DSC00001.ARW` (single folder)
-- `{camera}/{yy}{mm}{dd}` → `D:/Photos/ZV-E10/251225/DSC00001.ARW`
-- `{yyyy}/{m}/{d}` → `D:/Photos/2025/12/25/DSC00001.ARW` (no leading zeros)
-
-> **Note:** Dấu `/` tạo subfolder. Không có `/` = tên folder đơn.
-
-## Camera hỗ trợ
-
-| Model | Năm | Trạng thái |
-|-------|-----|------------|
-| NEX-5R | 2012 | ✅ Tested |
-| ZV-E10 | 2021 | ✅ Tested |
-| A7R III | 2017 | ✅ Tested |
-| A7 III | 2018 | ⚠️ Chưa test |
-| A7 IV | 2021 | ⚠️ Chưa test |
-
-> Hầu hết các máy Sony từ 2010 trở lại đây đều hỗ trợ MTP và sẽ hoạt động.
-
-## Troubleshooting
-
-### Camera không được nhận diện
-1. Kiểm tra camera đã bật chưa
-2. Kiểm tra USB mode trên camera (phải là MTP, không phải PC Remote)
-3. Thử rút dây và cắm lại
-4. Kiểm tra log file: `%USERPROFILE%\.sony_camera_sync\app.log`
-
-### Files không được copy
-1. Kiểm tra file type có trong config file (ví dụ: `CameraConnectConfig.yaml`) → `file_types` chưa
-2. Kiểm tra quyền ghi vào thư mục đích
-3. Kiểm tra database: `%USERPROFILE%\.sony_camera_sync\sync_queue.db`
-
-### Notification không hiện
-- Cài đặt: `pip install win10toast`
-- Kiểm tra Windows notification settings
-
-## Roadmap
-
-- [ ] System tray UI
-- [ ] Settings dialog (GUI)
-- [ ] Google Drive sync
-- [ ] NAS/SMB sync
-- [ ] Auto-delete files on camera after sync
-- [ ] PyInstaller build script (.exe)
+- `rclone.conf` and the AppDB session live under `%LOCALAPPDATA%\CameraConnect\secrets` (0600).
+- Vault format is byte-compatible with the LNC Proxy `cred-vault.js` (PBKDF2-SHA256 ×150k + AES-256-GCM) — the server only stores ciphertext.
+- The bundled AppDB anon key is public-by-design (Supabase RLS); `sb_secret_*` keys are rejected.
 
 ## License
 
-MIT License
-
-## Credits
-
-Developed for Sony camera users who want seamless photo/video backup workflow.
+[PolyForm Noncommercial 1.0.0](LICENSE) — free for personal/non-commercial use. Commercial use requires a separate license.
