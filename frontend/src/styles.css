@@ -191,3 +191,38 @@ html, body {
 .cc-log .lvl-WARN, .cc-log .lvl-WARNING { color: #fbbf24; }
 .cc-log .lvl-ERROR { color: #f87171; }
 .cc-log .lvl-DEBUG { color: #6b7280; }
+
+/* ---- themed select ---- */
+.cc-select {
+  appearance: none;
+  padding-right: 30px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239b9b9b' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.cc-select:hover { border-color: var(--border-hover, #444); }
+.cc-select option {
+  background: var(--bg-input, #2a2a2a);
+  color: var(--text-primary, #e3e3e3);
+}
+
+/* WebView2/Chromium ≥125: the popup itself becomes CSS-styleable.
+   Older runtimes fall back to the native (already rounded on Win11) list. */
+@supports (appearance: base-select) {
+  .cc-select { appearance: base-select; }
+  .cc-select::picker(select) {
+    appearance: base-select;
+    background: var(--bg-elevated, #2e2e2e);
+    color: var(--text-primary, #e3e3e3);
+    border: 1px solid var(--border, #333);
+    border-radius: 10px;
+    padding: 4px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  }
+  .cc-select option { border-radius: 7px; padding: 7px 10px; }
+  .cc-select option::checkmark { display: none; }
+  .cc-select option:hover,
+  .cc-select option:focus-visible { background: var(--bg-hover, #2f2f2f); }
+  .cc-select option:checked { background: color-mix(in srgb, var(--accent, #2563eb) 30%, transparent); }
+}
