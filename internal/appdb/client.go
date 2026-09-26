@@ -206,11 +206,11 @@ type EnrollResult struct {
 func (c *Client) EnrollInstallation(ctx context.Context, s *Session, tenantID, machineLabel, version string) (*EnrollResult, error) {
 	var rows []EnrollResult
 	err := c.rpc(ctx, s, "extension_enroll_current_installation", map[string]any{
-		"p_tenant_id":       tenantID,
-		"p_extension_key":   ExtensionSlug,
-		"p_installation_key": installationKey(),
-		"p_machine_label":   machineLabel,
-		"p_platform":        "windows",
+		"p_tenant_id":         tenantID,
+		"p_extension_key":     ExtensionSlug,
+		"p_installation_key":  installationKey(),
+		"p_machine_label":     machineLabel,
+		"p_platform":          "windows",
 		"p_installed_version": version,
 	}, &rows)
 	if err != nil {
@@ -220,6 +220,17 @@ func (c *Client) EnrollInstallation(ctx context.Context, s *Session, tenantID, m
 		return nil, fmt.Errorf("appdb: empty enroll response")
 	}
 	return &rows[0], nil
+}
+
+// CreateTenant creates a personal tenant owned by the signed-in user
+// (mirrors extension_create_tenant; returns the new tenant_id).
+func (c *Client) CreateTenant(ctx context.Context, s *Session, slug, name string) (string, error) {
+	var id string
+	err := c.rpc(ctx, s, "extension_create_tenant", map[string]any{
+		"p_slug": slug,
+		"p_name": name,
+	}, &id)
+	return id, err
 }
 
 // Tenants lists the memberships of the signed-in user.

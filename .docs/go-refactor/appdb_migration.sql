@@ -1,43 +1,33 @@
 -- ============================================================
 -- Camera Connect — AppDB registration migration (owner-run)
 -- Target: https://appdb.lengoc.me (Supabase project DB)
--- Purpose: register the `camera_connect` extension slug so the
---          shared extension_* schema accepts Camera Connect
---          devices/settings alongside LNC-Proxy.
 --
--- NOTE: run this in the Supabase SQL editor or psql as a role
--- with write access to the extension tables. Verify table names
--- against the live schema first (they were originally created by
--- the LNC-Proxy migration 004_extension_tables.sql).
+-- AppDB is a SHARED multi-app backend: all apps live in the
+-- generic extension_* schema and are distinguished by
+-- extension_key rows in public.extension_catalog (created by
+-- 001_core_schema.sql of the LNC-Proxy/LuxeClaw migrations).
+-- We do NOT create cameraconnect_* tables.
+--
+-- Run in the Supabase SQL editor as the owner role.
 -- ============================================================
 
 begin;
 
--- 1) Extension/app registration --------------------------------
--- Adjust table/column names if the live schema differs
--- (candidates: public.extensions, public.extension_apps,
---  columns: slug | extension_key, name | display_name).
-insert into public.extensions (slug, name)
-values ('camera_connect', 'Camera Connect')
-on conflict (slug) do nothing;
-
--- Fallback variant if the registry uses extension_key naming:
--- insert into public.extensions (extension_key, name)
--- values ('camera_connect', 'Camera Connect')
--- on conflict (extension_key) do nothing;
-
--- 2) Optional: grant usage on extension_settings sequences -----
--- Only needed if the schema uses sequences owned by another role.
--- (Usually unnecessary with Supabase + RLS.)
+-- Register the app slug. extension_key must match
+-- '^[a-z0-9]+(?:[._-][a-z0-9]+)*$' — 'camera_connect' is valid.
+insert into public.extension_catalog (extension_key, display_name, status)
+values ('camera_connect', 'Camera Connect', 'active')
+on conflict (extension_key) do nothing;
 
 commit;
 
--- Verification queries (run after):
--- select * from public.extensions where slug = 'camera_connect';
--- select * from public.extension_tenants;   -- confirm tenant exists
+-- Verification (run after):
+--   select id, extension_key, display_name, status
+--   from public.extension_catalog where extension_key = 'camera_connect';
 --
--- After this migration the app can:
---   * enroll installations  (extension_enroll_current_installation)
---   * upsert scoped settings (extension_upsert_setting)
---   * heartbeat             (extension_heartbeat_installation)
--- with p_extension_key = 'camera_connect'.
+-- After this row exists the app can:
+--   * extension_enroll_current_installation(p_extension_key := 'camera_connect', ...)
+--   * extension_upsert_setting(p_extension_key := 'camera_connect', ...)
+--   * extension_heartbeat_installation(...)
+-- Note: enroll requires a tenant (p_tenant_id). First-time users call
+-- extension_create_tenant first — handled by internal/appdb enrollment ctx.

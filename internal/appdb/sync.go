@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,6 +59,18 @@ func (s *Service) Login(ctx context.Context, email, password string) error {
 	// immediately; multi-tenant UX lands in Phase 6 device picker).
 	if s.ctx == nil {
 		tenants, err := s.client.Tenants(ctx, sess)
+		if err == nil && len(tenants) == 0 {
+			// First login ever — create a personal tenant so enrollment has
+			// somewhere to land (mirrors LNC-Proxy first-run behavior).
+			slug := "user-" + tenantSlugFromEmail(email)
+			if tid, cerr := s.client.CreateTenant(ctx, sess, slug, s.machineLabel); cerr == nil {
+				tenants = []struct {
+					TenantID string `json:"tenant_id"`
+					Role     string `json:"role"`
+					Status   string `json:"status"`
+				}{{TenantID: tid, Role: "owner", Status: "active"}}
+			}
+		}
 		if err == nil {
 			for _, t := range tenants {
 				if t.Status == "active" || t.Status == "" {
@@ -212,6 +225,29 @@ func (s *Service) PullRcloneConf(ctx context.Context, passphrase string) error {
 		return err
 	}
 	return os.WriteFile(s.RcloneConfPath(), []byte(payload.RcloneConf), 0o600)
+}
+
+// tenantSlugFromEmail derives a safe tenant slug from a login email —
+// must satisfy '^[a-z0-9]+(?:[._-][a-z0-9]+)*$'.
+func tenantSlugFromEmail(email string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(email)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else if r == '@' || r == '.' || r == '_' || r == '-' || r == '+' {
+			if b.Len() > 0 && !strings.HasSuffix(b.String(), "-") {
+				b.WriteByte('-')
+			}
+		}
+	}
+	s := strings.Trim(b.String(), "-")
+	if s == "" {
+		s = "personal"
+	}
+	if len(s) > 40 {
+		s = s[:40]
+	}
+	return s
 }
 
 // ---------- persistence ----------
