@@ -24,11 +24,13 @@ import (
 
 	"github.com/ngojclee/camera-connect/internal/config"
 	"github.com/ngojclee/camera-connect/internal/coordinator"
+	"github.com/ngojclee/camera-connect/internal/detect"
 	"github.com/ngojclee/camera-connect/internal/ipc"
 	"github.com/ngojclee/camera-connect/internal/logstream"
 	"github.com/ngojclee/camera-connect/internal/monitor"
 	winplatform "github.com/ngojclee/camera-connect/internal/platform/windows"
 	"github.com/ngojclee/camera-connect/internal/store"
+	"github.com/ngojclee/camera-connect/internal/syncengine"
 	"github.com/ngojclee/camera-connect/internal/tray"
 	updatepkg "github.com/ngojclee/camera-connect/internal/update"
 )
@@ -228,6 +230,51 @@ func main() {
 		})
 	}
 
+	// --- Camera detection watcher (mass storage now; MTP joins Phase 3) ---
+	syncDeps := &syncengine.Deps{
+		Config: cfgMgr,
+		Store:  db,
+		Logf:   log.Printf,
+		PendingUpload: func(destPath string) {
+			if db == nil {
+				return
+			}
+			payload := fmt.Sprintf(`{"files":[%q]}`, destPath)
+			if _, err := db.EnqueueJob(context.Background(), store.KindUpload, payload); err != nil {
+				log.Printf("[WARN] enqueue upload job failed: %v", err)
+			}
+		},
+	}
+	deviceLoops := newDeviceLoopManager(syncWorker, syncDeps, appState, eventBus, cfgMgr)
+	watcher := detect.NewWatcher(2*time.Second, detect.Hooks{
+		OnConnect: func(dev detect.Device) {
+			model := dev.Model
+			log.Printf("[INFO] Camera connected: %s (%s mode%s)", model, dev.Mode, driveSuffix(dev))
+			appState.CameraConnected(ipc.CameraInfo{
+				ID:          dev.ID,
+				Model:       model,
+				Mode:        string(dev.Mode),
+				DriveLetter: dev.DriveLetter,
+				Status:      "idle",
+			})
+			eventBus.Emit(coordinator.InternalEvent{Type: coordinator.EvtCameraStarted, Payload: dev})
+			deviceLoops.Start(ctx, dev)
+		},
+		OnDisconnect: func(dev detect.Device) {
+			log.Printf("[INFO] Camera disconnected: %s (%s)", dev.Model, dev.ID)
+			deviceLoops.Stop(dev.ID)
+			appState.CameraDisconnected(dev.ID)
+			eventBus.Emit(coordinator.InternalEvent{Type: coordinator.EvtCameraStopped, Payload: dev})
+		},
+		OnError: func(err error) {
+			log.Printf("[WARN] detector error: %v", err)
+			appState.IncDetectError()
+		},
+	})
+	startManaged(ctx, &wg, "camera-detector", func(ctx context.Context) {
+		watcher.Run(ctx)
+	})
+
 	// --- Sleep/resume detector ---
 	resumeDetector := monitor.NewResumeDetector(5*time.Second, 20*time.Second, monitor.ResumeHooks{
 		OnResume: func(gap time.Duration) {
@@ -262,6 +309,9 @@ func main() {
 			appState:      appState,
 			logBuffer:     logBuffer,
 			syncWorker:    syncWorker,
+			watcher:       watcher,
+			deviceLoops:   deviceLoops,
+			syncDeps:      syncDeps,
 			shutdownCh:    shutdownCh,
 			updateChecker: updateChecker,
 			updateMu:      &updateMu,
@@ -326,6 +376,9 @@ type agentDeps struct {
 	appState      *coordinator.AppState
 	logBuffer     *logstream.Buffer
 	syncWorker    *coordinator.SyncWorker
+	watcher       *detect.Watcher
+	deviceLoops   *deviceLoopManager
+	syncDeps      *syncengine.Deps
 	shutdownCh    chan struct{}
 	updateChecker *updatepkg.Checker
 	updateMu      *sync.Mutex
@@ -393,21 +446,28 @@ func dispatchCommand(reqCtx context.Context, req ipc.Request, d *agentDeps) ipc.
 		if err != nil {
 			return ipc.Response{Success: false, Error: fmt.Sprintf("invalid scan_now payload: %v", err), Code: ipc.CodeBadRequest}
 		}
-		jobName := "scan_now"
-		err = d.syncWorker.Enqueue(coordinator.SyncJob{
-			Name:           jobName,
-			OperationID:    fmt.Sprintf("scan_now_%d", time.Now().UTC().UnixNano()),
-			MaxRunDuration: 10 * time.Minute,
-			Execute: func(ctx context.Context) error {
-				// Phase 2 wires the real detector + sync engine here.
-				log.Printf("[INFO] scan_now requested (device=%q dates=%v) — detector not wired yet", payload.DeviceID, payload.Dates)
-				return nil
-			},
-		})
-		if err != nil {
-			return ipc.Response{Success: false, Error: err.Error(), Code: ipc.CodeInternalError}
+		devices := d.watcher.Devices()
+		if len(devices) == 0 {
+			return ipc.Response{Success: false, Error: "no camera connected", Code: ipc.CodeBadRequest}
 		}
-		return ipc.Response{Success: true, Data: map[string]string{"queued": "true"}, Code: ipc.CodeOK}
+		queued := 0
+		for _, dev := range devices {
+			if dev.Mode != detect.ModeMassStorage {
+				continue // MTP lands in Phase 3
+			}
+			if payload.DeviceID != "" && payload.DeviceID != dev.ID {
+				continue
+			}
+			if err := enqueueDeviceSync(d.syncWorker, dev, d.syncDeps, d.appState, "manual_scan"); err != nil {
+				log.Printf("[WARN] enqueue scan for %s failed: %v", dev.ID, err)
+				continue
+			}
+			queued++
+		}
+		if queued == 0 {
+			return ipc.Response{Success: false, Error: "no mass-storage camera matched (MTP support lands in Phase 3)", Code: ipc.CodeBadRequest}
+		}
+		return ipc.Response{Success: true, Data: map[string]string{"queued": fmt.Sprintf("%d", queued)}, Code: ipc.CodeOK}
 
 	case ipc.CmdPauseSync:
 		d.syncWorker.Pause()
@@ -612,6 +672,101 @@ func waitGroupWithTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
 	case <-time.After(timeout):
 		return false
 	}
+}
+
+// ---------- device sync loops ----------
+
+// enqueueDeviceSync queues one sync pass over a device on the single-flight worker.
+func enqueueDeviceSync(worker *coordinator.SyncWorker, dev detect.Device, deps *syncengine.Deps, state *coordinator.AppState, trigger string) error {
+	jobName := fmt.Sprintf("sync_%s", strings.ReplaceAll(dev.ID, ":", "_"))
+	return worker.Enqueue(coordinator.SyncJob{
+		Name:           jobName,
+		OperationID:    fmt.Sprintf("%s_%s_%d", jobName, trigger, time.Now().UTC().UnixNano()),
+		MaxRunDuration: 60 * time.Minute, // large video batches need room
+		Execute: func(ctx context.Context) error {
+			state.SetCameraStatus(dev.ID, "syncing")
+			defer state.SetCameraStatus(dev.ID, "idle")
+			res, err := syncengine.SyncDevice(ctx, dev, deps)
+			if err != nil {
+				return err
+			}
+			if res.Downloaded > 0 {
+				state.AddFilesSynced(res.Downloaded)
+			}
+			state.SetCameraLastSync(dev.ID, time.Now().Format(time.RFC3339))
+			return nil
+		},
+	})
+}
+
+// deviceLoopManager runs per-device sync loops: once on connect when
+// auto_sync is on, then repeating at poll_interval in continuous mode.
+type deviceLoopManager struct {
+	mu     sync.Mutex
+	loops  map[string]context.CancelFunc
+	worker *coordinator.SyncWorker
+	deps   *syncengine.Deps
+	state  *coordinator.AppState
+	bus    *coordinator.EventBus
+	cfgMgr *config.Manager
+}
+
+func newDeviceLoopManager(worker *coordinator.SyncWorker, deps *syncengine.Deps, state *coordinator.AppState, bus *coordinator.EventBus, cfgMgr *config.Manager) *deviceLoopManager {
+	return &deviceLoopManager{loops: map[string]context.CancelFunc{}, worker: worker, deps: deps, state: state, bus: bus, cfgMgr: cfgMgr}
+}
+
+// Start begins the sync loop for a connected device.
+func (m *deviceLoopManager) Start(parent context.Context, dev detect.Device) {
+	m.Stop(dev.ID)
+	if dev.Mode != detect.ModeMassStorage {
+		return // MTP engines land in Phase 3
+	}
+	shared := m.cfgMgr.Shared()
+	if !shared.General.AutoSync {
+		return // manual mode: wait for scan_now
+	}
+	ctx, cancel := context.WithCancel(parent)
+	m.mu.Lock()
+	m.loops[dev.ID] = cancel
+	m.mu.Unlock()
+
+	go func() {
+		_ = enqueueDeviceSync(m.worker, dev, m.deps, m.state, "auto_connect")
+		if !strings.EqualFold(shared.General.ScanMode, "continuous") {
+			return // "once" mode: single pass per connect
+		}
+		poll := time.Duration(shared.General.PollInterval) * time.Second
+		if poll <= 0 {
+			poll = 3 * time.Second
+		}
+		ticker := time.NewTicker(poll)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_ = enqueueDeviceSync(m.worker, dev, m.deps, m.state, "auto_poll")
+			}
+		}
+	}()
+}
+
+// Stop cancels a device's sync loop (e.g., on disconnect).
+func (m *deviceLoopManager) Stop(deviceID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cancel, ok := m.loops[deviceID]; ok {
+		cancel()
+		delete(m.loops, deviceID)
+	}
+}
+
+func driveSuffix(dev detect.Device) string {
+	if dev.DriveLetter != "" {
+		return ", " + dev.DriveLetter
+	}
+	return ""
 }
 
 func hostNameOrUnknown() string {

@@ -25,13 +25,14 @@
 - [x] Frontend skeleton: Vite+TS+Tailwind v4 + LN-UI-Engine theme CSS imported; dashboard renders status/cameras/profiles/logs via `window.go` bridge
 - [x] Gate: `go build ./...` ✅ · `go test ./...` ✅ · `go vet ./...` ✅ · `npm run build` ✅ · agent launch + `--action ping/get-status/get-config/save-config/scan-now/shutdown-agent` all verified over named pipe; `%LOCALAPPDATA%\CameraConnect\{config.yaml,config.local.yaml,cache.db,tray_status.json}` created
 
-## Phase 2 — Detection v2 + Mass Storage engine
-- [ ] `internal/detect`: WMI `Win32_PnPEntity` poll (2s) — class-based (`PortableDevice`/`WUDFWpdFs`) + VID/PID friendly-name table (Sony 054C, Canon 04A9, Nikon 04B0, Fuji 04CB, Panasonic 04DA, OM 07B4, GoPro 2672, DJI 2CA3)
-- [ ] Drive discovery: `GetLogicalDrives` + `GetDriveTypeW(DRIVE_REMOVABLE)` + `DCIM|PRIVATE` probe; correlate drive→camera via PNP DeviceID; unmatched drives exposed as standalone sources
-- [ ] `internal/camera/massstorage`: port `mass_storage_handler.py` — list, `copy2`-equiv w/ progress, delete (+ thumbnail/XML cleanup), `find_all_camera_drives`
-- [ ] `internal/syncengine`: per-camera loop honoring `scan_mode`, `poll_interval`, `active_profile`; filesystem-existence skip; templates `{camera}/{yyyy}/{yyyy}-{mm}-{dd}` etc.
-- [ ] Extended file-type defaults + per-profile overrides
-- [ ] Gate: sync real SD card → correct dated folders, skip-existing works, move mode deletes verified copies only
+## Phase 2 — Detection v2 + Mass Storage engine ✅ (2026-09-26)
+- [x] `internal/detect`: WMI `Win32_PnPEntity` poll — `PNPClass=PortableDevice`/`Service=WUDFWpdFs` + brand VID table (Sony 054C, Canon 04A9, Nikon 04B0, Fuji 04CB, Panasonic 04DA, OM 07B4, GoPro 2672, DJI 2CA3, Creative, Blackmagic)
+- [x] Drive discovery: `GetLogicalDrives` + `GetDriveTypeW(DRIVE_REMOVABLE)` + `DCIM|PRIVATE` probe + volume label; `Win32_DiskDrive→Partition→LogicalDisk` correlation for model names (StackExchange/wmi)
+- [x] `internal/camera/massstorage`: recursive scan (skips THMBNL/THUMBNAIL), `PRIVATE/M4ROOT/CLIP` video scan, date-from-folder or mtime; `CopyTo` via `.part`+fsync+size-verify+rename (crash-safe); `Delete` removes THMBNL thumbs + XML sidecars
+- [x] `internal/syncengine`: template renderer `{camera}/{type}/{yyyy}/{yy}/{mm}/{m}/{dd}/{d}/{date}` + legacy `{year}/{month}/{day}`; `SyncDevice` per-camera pass honoring `scan_mode`, `poll_interval`, `active_profile`, `sync_mode`; filesystem-existence skip (filesystem=truth, DB=history); `PendingUpload` → jobs queue
+- [x] Agent wiring: `detect.Watcher`→state/events; `deviceLoopManager` (auto_sync on connect; continuous re-scan at poll_interval; stops on disconnect); `scan_now` runs real sync on mass-storage devices
+- [x] Tests: template render, fake-card copy/skip/move incl. sidecar cleanup — `go test ./...` all pass
+- [ ] Hardware gate pending owner: real SD card insert → dated folders + skip + move mode (needs physical card)
 
 ## Phase 3 — MTP (risk phase)
 - [ ] Spike: `go-ole` IDispatch → `Shell.Application`/`Namespace`/`CopyHere` PoC (≤1 day) — decide a/b/c per plan §6
