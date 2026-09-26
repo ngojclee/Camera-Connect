@@ -58,6 +58,13 @@ type MediaSource interface {
 
 // SyncDevice runs one full pass over a detected device.
 func SyncDevice(ctx context.Context, dev detect.Device, deps *Deps) (*Result, error) {
+	return SyncDeviceProfile(ctx, dev, deps, "")
+}
+
+// SyncDeviceProfile runs one pass bound to a specific profile; an empty
+// profileID falls back to the shared active profile. Manual scans use this
+// to target a profile without changing the auto-sync active profile.
+func SyncDeviceProfile(ctx context.Context, dev detect.Device, deps *Deps, profileID string) (*Result, error) {
 	res := &Result{DeviceID: dev.ID, Camera: dev.Model}
 
 	var src MediaSource
@@ -80,7 +87,15 @@ func SyncDevice(ctx context.Context, dev detect.Device, deps *Deps) (*Result, er
 		return res, fmt.Errorf("unknown device mode %q", dev.Mode)
 	}
 
-	profile := deps.Config.ActiveProfile()
+	var profile *config.Profile
+	if profileID != "" {
+		profile = deps.Config.ProfileByID(profileID)
+		if profile == nil {
+			return res, fmt.Errorf("profile not found: %s", profileID)
+		}
+	} else {
+		profile = deps.Config.ActiveProfile()
+	}
 	if profile == nil {
 		return res, fmt.Errorf("no active profile configured")
 	}

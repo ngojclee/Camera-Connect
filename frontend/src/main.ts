@@ -49,6 +49,7 @@ const state: {
   logs: { id: number; level: string; message: string }[];
   logCursor: number; logLevel: string;
   editingProfile?: string; notice?: string;
+  importProfile?: string; // manual-import target — independent of active profile
 } = { panel: "dashboard", history: [], logs: [], logCursor: 0, logLevel: "ALL" };
 
 const app = document.getElementById("app")!;
@@ -61,10 +62,10 @@ const isTextField = (el: EventTarget | null): el is HTMLInputElement | HTMLTextA
   el instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit"].includes(el.type)
   || el instanceof HTMLTextAreaElement;
 app.addEventListener("input", e => {
-  const el = e.target as HTMLInputElement;
-  if (!el.id) return;
+  const el = e.target;
+  if (!(el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement) || !el.id) return;
   if (el instanceof HTMLInputElement && el.type === "checkbox") drafts[el.id] = el.checked ? "1" : "0";
-  else if (isTextField(el) || el instanceof HTMLSelectElement) drafts[el.id] = el.value;
+  else drafts[el.id] = el.value;
 });
 function clearDrafts(prefix: string): void { for (const k of Object.keys(drafts)) if (k.startsWith(prefix)) delete drafts[k]; }
 
@@ -130,16 +131,23 @@ function panelDashboard(): string {
 
 function panelImport(): string {
   const cams = state.status?.cameras ?? [];
+  const profiles = state.config?.profiles ?? [];
+  const target = state.importProfile ?? state.config?.active_profile ?? "";
   return `
   <div class="cc-card">
     <h3>Manual Import</h3>
-    <div class="cc-empty">Scan connected cameras and copy new media into the active profile destination. Move mode deletes from camera after copy (mass storage only).</div>
+    <div class="cc-empty">One-shot scan → copy new media into the profile chosen below. Independent of auto-sync: it queues after any running job and never changes the active profile. Move mode deletes from camera after copy (mass storage only).</div>
     <div class="cc-row" style="margin-top:10px">
+      <label class="cc-muted" style="font-size:12px">Import into</label>
+      <select class="cc-select" id="import-profile">
+        ${profiles.map(p => `<option value="${esc(p.id)}" ${p.id === target ? "selected" : ""}>${esc(p.name)} — ${esc(p.base_path || "")}</option>`).join("")}
+      </select>
       <select class="cc-select" id="import-mode">
         <option value="">Default mode</option><option value="copy">Copy</option><option value="move">Move (MS only)</option>
       </select>
       <button class="cc-btn primary" id="btn-import-all"><span class="material-symbols-outlined">download</span>Import All Cameras</button>
     </div>
+    ${profiles.length === 0 ? `<div class="cc-empty" style="margin-top:8px">No profiles yet — create one in Profiles first.</div>` : ""}
   </div>
   <div class="cc-card">
     <h3>Connected</h3>
@@ -412,14 +420,19 @@ function wire(): void {
     const id = (e.target as HTMLSelectElement).value;
     if (id) { await execAction("set-profile", JSON.stringify({ profile_id: id })); toast("Profile switched"); refresh(); }
   });
+  document.getElementById("import-profile")?.addEventListener("change", e => {
+    state.importProfile = (e.target as HTMLSelectElement).value; // manual target only
+  });
   document.getElementById("btn-import-all")?.addEventListener("click", async () => {
     const mode = (document.getElementById("import-mode") as HTMLSelectElement)?.value;
-    const r = await execAction("scan-now", JSON.stringify(mode ? { mode } : {}));
+    const profile_id = (document.getElementById("import-profile") as HTMLSelectElement)?.value;
+    const r = await execAction("scan-now", JSON.stringify({ ...(mode ? { mode } : {}), ...(profile_id ? { profile_id } : {}) }));
     toast(r.ok ? "Import started" : (r.error ?? "failed")); refresh();
   });
   document.querySelectorAll("[data-scan]").forEach(el =>
     el.addEventListener("click", async () => {
-      const r = await execAction("scan-now", JSON.stringify({ device_id: (el as HTMLElement).dataset.scan }));
+      const pid = (document.getElementById("import-profile") as HTMLSelectElement)?.value;
+      const r = await execAction("scan-now", JSON.stringify({ device_id: (el as HTMLElement).dataset.scan, ...(pid ? { profile_id: pid } : {}) }));
       toast(r.ok ? "Sync queued" : (r.error ?? "failed")); refresh();
     }));
 

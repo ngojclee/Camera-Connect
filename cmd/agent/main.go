@@ -508,7 +508,7 @@ func dispatchCommand(reqCtx context.Context, req ipc.Request, d *agentDeps) ipc.
 			if payload.DeviceID != "" && payload.DeviceID != dev.ID {
 				continue
 			}
-			if err := enqueueDeviceSync(d.syncWorker, dev, d.syncDeps, d.appState, "manual_scan"); err != nil {
+			if err := enqueueDeviceSync(d.syncWorker, dev, d.syncDeps, d.appState, "manual_scan", payload.ProfileID); err != nil {
 				log.Printf("[WARN] enqueue scan for %s failed: %v", dev.ID, err)
 				continue
 			}
@@ -814,7 +814,10 @@ func waitGroupWithTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
 // ---------- device sync loops ----------
 
 // enqueueDeviceSync queues one sync pass over a device on the single-flight worker.
-func enqueueDeviceSync(worker *coordinator.SyncWorker, dev detect.Device, deps *syncengine.Deps, state *coordinator.AppState, trigger string) error {
+// enqueueDeviceSync queues one sync pass over a device on the single-flight
+// worker. profileID="" uses the shared active profile; a non-empty value is
+// a one-shot override for manual scans (does not touch active_profile).
+func enqueueDeviceSync(worker *coordinator.SyncWorker, dev detect.Device, deps *syncengine.Deps, state *coordinator.AppState, trigger, profileID string) error {
 	jobName := fmt.Sprintf("sync_%s", strings.ReplaceAll(dev.ID, ":", "_"))
 	return worker.Enqueue(coordinator.SyncJob{
 		Name:           jobName,
@@ -823,7 +826,7 @@ func enqueueDeviceSync(worker *coordinator.SyncWorker, dev detect.Device, deps *
 		Execute: func(ctx context.Context) error {
 			state.SetCameraStatus(dev.ID, "syncing")
 			defer state.SetCameraStatus(dev.ID, "idle")
-			res, err := syncengine.SyncDevice(ctx, dev, deps)
+			res, err := syncengine.SyncDeviceProfile(ctx, dev, deps, profileID)
 			if err != nil {
 				return err
 			}
@@ -865,7 +868,7 @@ func (m *deviceLoopManager) Start(parent context.Context, dev detect.Device) {
 	m.mu.Unlock()
 
 	go func() {
-		_ = enqueueDeviceSync(m.worker, dev, m.deps, m.state, "auto_connect")
+		_ = enqueueDeviceSync(m.worker, dev, m.deps, m.state, "auto_connect", "")
 		if !strings.EqualFold(shared.General.ScanMode, "continuous") {
 			return // "once" mode: single pass per connect
 		}
@@ -880,7 +883,7 @@ func (m *deviceLoopManager) Start(parent context.Context, dev detect.Device) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_ = enqueueDeviceSync(m.worker, dev, m.deps, m.state, "auto_poll")
+				_ = enqueueDeviceSync(m.worker, dev, m.deps, m.state, "auto_poll", "")
 			}
 		}
 	}()

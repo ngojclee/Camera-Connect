@@ -210,9 +210,10 @@ type DownloadUpdateResult struct {
 
 // ScanNowPayload requests a manual scan of a camera/drive.
 type ScanNowPayload struct {
-	DeviceID string   `json:"device_id,omitempty"` // empty = all connected
-	Dates    []string `json:"dates,omitempty"`     // empty = all dates
-	Mode     string   `json:"mode,omitempty"`      // "copy" | "move"
+	DeviceID  string   `json:"device_id,omitempty"`  // empty = all connected
+	Dates     []string `json:"dates,omitempty"`      // empty = all dates
+	Mode      string   `json:"mode,omitempty"`       // "copy" | "move"
+	ProfileID string   `json:"profile_id,omitempty"` // empty = active profile
 }
 
 // SetProfilePayload selects the active profile.
