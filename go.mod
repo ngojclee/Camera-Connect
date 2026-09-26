@@ -7,6 +7,7 @@ require (
 	github.com/StackExchange/wmi v1.2.1
 	github.com/go-ole/go-ole v1.3.0
 	github.com/wailsapp/wails/v2 v2.16.0
+	golang.org/x/crypto v0.53.0
 	golang.org/x/sys v0.48.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.59.0
@@ -39,7 +40,6 @@ require (
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/wailsapp/go-webview2 v1.0.22 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
-	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	modernc.org/libc v1.75.7 // indirect

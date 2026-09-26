@@ -53,14 +53,15 @@
 - [x] Tests: fake rclone runner — success finalize, free-space delete, failure→retry_wait survival — all pass; `go build/test/vet` clean
 - [ ] Hardware gate pending owner: real rclone.conf + Drive remote; 4GB video kill-mid-upload resume check
 
-## Phase 5 — AppDB sync + vault
-- [ ] Owner runs SQL migration on appdb.lengoc.me registering slug `camera_connect` (author `012_camera_connect.sql` modeled on LNC-Proxy `004_extension_tables.sql`)
-- [ ] `internal/appdb`: GoTrue login/refresh + PostgREST calls (`extension_settings` get, `extension_upsert_setting`, `extension_enroll_current_installation`, `extension_heartbeat_installation`); anon-key validation (reject `sb_secret_`)
-- [ ] `internal/vault`: PBKDF2-SHA256(150k)+AES-GCM-256 seal/open matching `cred-vault.js` format exactly
-- [ ] Settings sync: `profiles`+`shared_config` @ user scope; `device_paths` @ device scope; revision-conflict handling → UI reload prompt
-- [ ] rclone.conf push/pull: seal→upsert `rclone_bundle` (user scope) / fetch→unseal→write `secrets\rclone.conf`; optional passphrase persist via Windows Credential Manager
-- [ ] Heartbeat loop + Devices list in UI
-- [ ] Gate: machine B fresh install → login → passphrase → Drive upload works without manual file copy
+## Phase 5 — AppDB sync + vault ✅ CODE COMPLETE (2026-09-26, live gates pending)
+- [x] Migration SQL authored: `.docs/go-refactor/appdb_migration.sql` registering slug `camera_connect` (owner runs on appdb.lengoc.me; adjust table name if schema differs)
+- [x] `internal/appdb`: GoTrue `/auth/v1/token` password+refresh grant; PostgREST RPCs (`enroll`, `heartbeat`, `upsert_setting`) + `extension_settings` GET with scope-column map (tenant/user/device/installation/shop); anon key embedded (public-by-design, rejects `sb_secret_*`); `SessionStore` persists session+enroll ctx in secrets dir (0600)
+- [x] `internal/vault`: PBKDF2-SHA256(150k)+AES-256-GCM, byte-compatible wire format with `cred-vault.js` (16B salt/12B IV/tag check); ErrAuth vs ErrMalformed separated; tests incl. tamper/wrong-pass
+- [x] `Service.PushRcloneConf/PullRcloneConf`: seal→upsert `rclone_bundle` @ user scope w/ revision check; pull→unseal→`secrets\rclone.conf` (0600); session auto-refresh on expiry
+- [x] IPC: `appdb_status/login/logout/vault_push/vault_pull` all wired — verified live: bad login → clean `invalid_credentials` from appdb.lengoc.me; missing rclone.conf → clear error; logged-out → `appdb: not authenticated`
+- [ ] Tenant picker for multi-tenant users (first active tenant auto-picked for now)
+- [ ] Settings sync loop (profiles @ user scope, device_paths @ device scope) + heartbeat loop — lands with Phase 6 sync UI
+- [ ] Live gate pending owner: run SQL migration → real login → push/pull rclone.conf → machine B fresh-install works without manual copy
 
 ## Phase 6 — UI
 - [ ] `frontend/` Vite+TS+Tailwind v4; `bridge.ts` (Wails + mock fallback); App/template/styles skeleton from LRSync

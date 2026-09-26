@@ -228,6 +228,12 @@ func (s *Service) ExecuteAction(action, payload string) ActionEnvelope {
 		return s.ShutdownAgent()
 	case "appdb-status":
 		return s.AppDBStatus()
+	case "appdb-login":
+		var p ipc.AppDBLoginPayload
+		if err := json.Unmarshal([]byte(payload), &p); err != nil {
+			return badRequestEnvelope(s.now, fmt.Sprintf("invalid appdb_login payload: %v", err))
+		}
+		return s.AppDBLogin(p.Email, p.Password)
 	case "appdb-logout":
 		return s.AppDBLogout()
 	case "vault-push":

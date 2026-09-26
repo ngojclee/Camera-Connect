@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ngojclee/camera-connect/internal/appdb"
 	"github.com/ngojclee/camera-connect/internal/backup"
 	"github.com/ngojclee/camera-connect/internal/config"
 	"github.com/ngojclee/camera-connect/internal/coordinator"
@@ -37,6 +38,10 @@ import (
 )
 
 var Version = "dev"
+
+// AppDB public anon key (public-by-design; RLS enforces access on
+// appdb.lengoc.me — same model as the LNC-Proxy extension).
+const appdbAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzc3Mjk2MTExLCJleHAiOjE5MzQ5NzYxMTF9.6xV2M4_vtotfjHvIcY1TKNkvvZ4fQPmgziCVaqdSWl0"
 
 var downloadedUpdateVersionPattern = regexp.MustCompile(`(?i)cameraconnect.*v?(\d+(?:\.\d+){2,3}).*\.(exe|msi)$`)
 
@@ -332,6 +337,7 @@ func main() {
 			syncDeps:      syncDeps,
 			uploadWorker:  uploadWorker,
 			batcher:       batcher,
+			appdbSvc:      newAppDBService(cfgMgr, machineName),
 			shutdownCh:    shutdownCh,
 			updateChecker: updateChecker,
 			updateMu:      &updateMu,
@@ -401,6 +407,7 @@ type agentDeps struct {
 	syncDeps      *syncengine.Deps
 	uploadWorker  *backup.Worker
 	batcher       *uploadBatcher
+	appdbSvc      *appdb.Service
 	shutdownCh    chan struct{}
 	updateChecker *updatepkg.Checker
 	updateMu      *sync.Mutex
@@ -662,7 +669,69 @@ func dispatchCommand(reqCtx context.Context, req ipc.Request, d *agentDeps) ipc.
 		}
 
 	case ipc.CmdAppDBStatus:
-		return ipc.Response{Success: true, Data: ipc.AppDBStatusResult{Enabled: false, LoggedIn: false}, Code: ipc.CodeOK}
+		if d.appdbSvc == nil {
+			return ipc.Response{Success: false, Error: "appdb unavailable", Code: ipc.CodeInternalError}
+		}
+		loggedIn, email, label := d.appdbSvc.Status()
+		return ipc.Response{Success: true, Data: ipc.AppDBStatusResult{
+			Enabled:     d.cfgMgr.Shared().Sync.Enabled,
+			LoggedIn:    loggedIn,
+			Email:       email,
+			DeviceLabel: label,
+		}, Code: ipc.CodeOK}
+
+	case ipc.CmdAppDBLogin:
+		payload, err := decodePayload[ipc.AppDBLoginPayload](req.Payload)
+		if err != nil || strings.TrimSpace(payload.Email) == "" || payload.Password == "" {
+			return ipc.Response{Success: false, Error: "email and password are required", Code: ipc.CodeBadRequest}
+		}
+		if d.appdbSvc == nil {
+			return ipc.Response{Success: false, Error: "appdb unavailable", Code: ipc.CodeInternalError}
+		}
+		if err := d.appdbSvc.Login(reqCtx, payload.Email, payload.Password); err != nil {
+			return ipc.Response{Success: false, Error: err.Error(), Code: ipc.CodeInternalError}
+		}
+		d.appState.SetAppDBConnected(true)
+		log.Printf("[INFO] AppDB logged in: %s", payload.Email)
+		return ipc.Response{Success: true, Data: map[string]string{"email": payload.Email}, Code: ipc.CodeOK}
+
+	case ipc.CmdAppDBLogout:
+		if d.appdbSvc == nil {
+			return ipc.Response{Success: false, Error: "appdb unavailable", Code: ipc.CodeInternalError}
+		}
+		if err := d.appdbSvc.Logout(); err != nil {
+			return ipc.Response{Success: false, Error: err.Error(), Code: ipc.CodeInternalError}
+		}
+		d.appState.SetAppDBConnected(false)
+		return ipc.Response{Success: true, Data: map[string]string{"status": "logged_out"}, Code: ipc.CodeOK}
+
+	case ipc.CmdVaultPush:
+		payload, err := decodePayload[ipc.VaultPayload](req.Payload)
+		if err != nil || payload.Passphrase == "" {
+			return ipc.Response{Success: false, Error: "passphrase is required", Code: ipc.CodeBadRequest}
+		}
+		if d.appdbSvc == nil {
+			return ipc.Response{Success: false, Error: "appdb unavailable", Code: ipc.CodeInternalError}
+		}
+		if err := d.appdbSvc.PushRcloneConf(reqCtx, payload.Passphrase); err != nil {
+			return ipc.Response{Success: false, Error: err.Error(), Code: ipc.CodeInternalError}
+		}
+		log.Printf("[INFO] rclone.conf sealed and pushed to AppDB")
+		return ipc.Response{Success: true, Data: map[string]string{"status": "pushed"}, Code: ipc.CodeOK}
+
+	case ipc.CmdVaultPull:
+		payload, err := decodePayload[ipc.VaultPayload](req.Payload)
+		if err != nil || payload.Passphrase == "" {
+			return ipc.Response{Success: false, Error: "passphrase is required", Code: ipc.CodeBadRequest}
+		}
+		if d.appdbSvc == nil {
+			return ipc.Response{Success: false, Error: "appdb unavailable", Code: ipc.CodeInternalError}
+		}
+		if err := d.appdbSvc.PullRcloneConf(reqCtx, payload.Passphrase); err != nil {
+			return ipc.Response{Success: false, Error: err.Error(), Code: ipc.CodeInternalError}
+		}
+		log.Printf("[INFO] rclone.conf pulled and unsealed → %s", d.appdbSvc.RcloneConfPath())
+		return ipc.Response{Success: true, Data: map[string]string{"status": "pulled"}, Code: ipc.CodeOK}
 
 	case ipc.CmdShutdownAgent:
 		log.Println("[INFO] Shutdown requested via IPC from UI")
@@ -792,6 +861,18 @@ func driveSuffix(dev detect.Device) string {
 		return ", " + dev.DriveLetter
 	}
 	return ""
+}
+
+// newAppDBService builds the AppDB sync service bound to the config secrets dir.
+// Always constructed — login remains optional, and the app is fully functional
+// offline (only sync/vault commands require auth).
+func newAppDBService(cfgMgr *config.Manager, machineName string) *appdb.Service {
+	client, err := appdb.NewClient(appdb.DefaultBaseURL, appdbAnonKey)
+	if err != nil {
+		log.Printf("[WARN] appdb client init failed: %v", err)
+		return nil
+	}
+	return appdb.NewService(client, cfgMgr.SecretsDir(), machineName, Version)
 }
 
 // ---------- upload batching ----------
