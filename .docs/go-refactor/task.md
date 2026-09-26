@@ -64,18 +64,20 @@
 - [ ] Settings sync loop (profiles @ user scope, device_paths @ device scope) + heartbeat loop — lands with Phase 6 sync UI
 - [ ] Live gate pending owner: run SQL migration → real login → push/pull rclone.conf → machine B fresh-install works without manual copy
 
-## Phase 6 — UI
-- [ ] `frontend/` Vite+TS+Tailwind v4; `bridge.ts` (Wails + mock fallback); App/template/styles skeleton from LRSync
-- [ ] Import LN-UI-Engine `src/theme/*.css`; map tokens to Tailwind `@theme`; light+dark
-- [ ] Panels: Dashboard, Import, Profiles, Backup, Sync(AppDB), History, Logs, Settings, About/Update
-- [ ] Profile switcher in header; native dir pickers via Wails runtime; offline-overlay pattern
-- [ ] Tray integration + single-instance + autostart registry
+## Phase 6 — UI ✅ (2026-09-26)
+- [x] 9-panel sidebar shell (Dashboard/Import/Profiles/Backup/Cloud Sync/History/Logs/Settings/About) — vanilla TS + theme CSS
+- [x] Profiles CRUD + per-machine path override + native dir picker (Wails OpenDirectoryDialog)
+- [x] Backup queue table + retry; AppDB login/logout + vault push/pull forms; update check/download UI
+- [x] `list_history` IPC + `store.ListFiles`; subscribe-logs honors after_id/limit/level; set-profile accepts JSON or bare id
+- [x] UI auto-launches agent when pipe is dead (was: dead dashboard)
 
-## Phase 7 — Installer, update, release
-- [ ] `installer/CameraConnectSetup.iss` (new AppId GUID) + `build_windows.ps1`/`build_installer.ps1` adapted
-- [ ] Self-update E2E: check→download `.part`→install over same dir→config preserved→relaunch minimized
-- [ ] `.github/workflows/windows-release.yml` adapted; tag `v*.*.*.*` release flow
-- [ ] README (EN+VI), screenshots, open-source prep checklist
+## Phase 7 — Installer, update, release ✅ (2026-09-26)
+- [x] `installer/CameraConnectSetup.iss` verified — `CameraConnectSetup-v3.0.0.1-windows-amd64.exe` built locally
+- [x] `.github/workflows/windows-release.yml` — test→build→installer→(optional codesign)→release on `v*` tags
+- [x] Update checker targets `ngojclee/camera-connect` releases
+- [x] README rewritten for public repo (features/install/config/CLI/security/license)
+- [ ] Self-update E2E on real install (pending first tagged release)
+- [ ] Screenshots for README
 
 ## Phase 8 — Testing
 - [ ] Port e2e ps1 smoke suite (agent IPC ping/status, sync-now via CLI action, tray presence)
