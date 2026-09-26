@@ -32,7 +32,8 @@
 - [x] `internal/syncengine`: template renderer `{camera}/{type}/{yyyy}/{yy}/{mm}/{m}/{dd}/{d}/{date}` + legacy `{year}/{month}/{day}`; `SyncDevice` per-camera pass honoring `scan_mode`, `poll_interval`, `active_profile`, `sync_mode`; filesystem-existence skip (filesystem=truth, DB=history); `PendingUpload` → jobs queue
 - [x] Agent wiring: `detect.Watcher`→state/events; `deviceLoopManager` (auto_sync on connect; continuous re-scan at poll_interval; stops on disconnect); `scan_now` runs real sync on mass-storage devices
 - [x] Tests: template render, fake-card copy/skip/move incl. sidecar cleanup — `go test ./...` all pass
-- [ ] Hardware gate pending owner: real SD card insert → dated folders + skip + move mode (needs physical card)
+- [x] **Hardware gate PASSED 2026-09-26** (commit `08810bc`): real Sony SD card (`G:\`) — filtered 2 WPD/USBSTOR ghost entries; `sync-now` copied **47 files** (JPG + MP4 ~2.5GB incl. 800MB videos) → `D:\Temp\CameraImport\Camera Card\2026\2026-02-01\` via `.part`+rename; second sync skipped all 47; 0 failures, 0 orphan .part files
+- [x] `save-config` accepts `profiles`/`profile_paths`/`file_type_*` patch fields (was missing — profiles could never be saved)
 
 ## Phase 3 — MTP ✅ CODE COMPLETE (2026-09-26, hardware gate pending)
 - [x] `internal/camera/mtp`: `go-ole` Shell.Application — all COM on one OS-locked worker goroutine per Source (apartment-safe); `NameSpace(17)` This PC enumeration, device match by PNP-device-id path or model name
