@@ -79,7 +79,14 @@ func (s *Source) worker() {
 		case <-s.done:
 			return
 		case req := <-s.reqCh:
-			req.done <- req.run()
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						req.done <- fmt.Errorf("com panic: %v", r)
+					}
+				}()
+				req.done <- req.run()
+			}()
 		}
 	}
 }
@@ -93,11 +100,21 @@ func (s *Source) Close() {
 	}
 }
 
-// run executes fn on the COM worker thread.
+// run executes fn on the COM worker thread. If the worker died (panic past
+// recovery, or source closed), it returns an error instead of hanging.
 func (s *Source) run(fn func() error) error {
 	done := make(chan error, 1)
-	s.reqCh <- comRequest{run: fn, done: done}
-	return <-done
+	select {
+	case s.reqCh <- comRequest{run: fn, done: done}:
+	case <-s.done:
+		return errors.New("mtp source closed")
+	}
+	select {
+	case err := <-done:
+		return err
+	case <-s.done:
+		return errors.New("mtp worker terminated")
+	}
 }
 
 // ---------- Shell helpers ----------
@@ -191,12 +208,14 @@ func itemSize(item *ole.IDispatch) int64 {
 func itemModifyDate(item *ole.IDispatch) time.Time {
 	v, err := oleutil.GetProperty(item, "ModifyDate")
 	if err != nil {
-		return time.Now()
+		return time.Time{}
 	}
-	if t, ok := v.Value().(time.Time); ok {
+	if t, ok := v.Value().(time.Time); ok && t.Year() >= 1980 {
 		return t
 	}
-	return time.Now()
+	// MTP devices frequently report the OLE-Automation epoch (1899-12-30)
+	// instead of a real date — treat it as unknown so callers fall back.
+	return time.Time{}
 }
 
 // pathMatchesPNP reports whether a shell item path contains every identifier
@@ -292,24 +311,37 @@ func (s *Source) ListMedia(ctx context.Context, _ string) ([]massstorage.MediaFi
 			return err
 		}
 		defer dev.Release()
+		log.Printf("[INFO] MTP: device %q found, walking folders…", s.model)
 		devFolder, err := itemSubFolder(dev)
 		if err != nil {
 			return fmt.Errorf("open device folder: %w", err)
 		}
 		defer devFolder.Release()
-		return s.walkFolder(devFolder, "", &out)
+		return s.walkFolder(ctx, devFolder, "", &out, 0)
 	})
+	log.Printf("[INFO] MTP: enumerated %d media file(s)", len(out))
 	return out, err
 }
 
 // walkFolder recurses a WPD folder tree collecting files under DCIM roots.
-func (s *Source) walkFolder(folder *ole.IDispatch, rel string, out *[]massstorage.MediaFile) error {
+// WPD exposes a big pseudo-tree (storages, folders); prune everything that
+// isn't under DCIM/PRIVATE to keep enumeration fast and bounded.
+func (s *Source) walkFolder(ctx context.Context, folder *ole.IDispatch, rel string, out *[]massstorage.MediaFile, depth int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if depth > 12 { // WPD trees are shallow; safety bound against cycles
+		return nil
+	}
 	items, count, err := folderItems(folder)
 	if err != nil {
 		return err
 	}
 	defer items.Release()
 	for i := 0; i < count; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		it, err := itemAt(items, i)
 		if err != nil {
 			continue
@@ -327,25 +359,36 @@ func (s *Source) walkFolder(folder *ole.IDispatch, rel string, out *[]massstorag
 				it.Release()
 				continue
 			}
-			// Prune: only descend into DCIM branches or storage roots
+			// Prune: don't descend into obvious non-media branches once we're
+			// past storage level (keeps MTP walks fast on multi-storage devices).
 			sub, err := itemSubFolder(it)
 			if err == nil {
-				_ = s.walkFolder(sub, relPath, out)
+				_ = s.walkFolder(ctx, sub, relPath, out, depth+1)
 				sub.Release()
 			}
 			it.Release()
 			continue
 		}
 
-		// File: keep it if under a DCIM/PRIVATE path (brand-agnostic media roots)
-		if !strings.Contains(upper, "DCIM") && !strings.Contains(upper, "PRIVATE") {
+		// File: MTP devices often present media as <storage>/<YYYY-MM-DD>/
+		// (Sony) with NO DCIM segment — keep media-extension files regardless
+		// of path; the engine's file-type filter gates the final set anyway.
+		if !isMediaExt(name) {
 			it.Release()
 			continue
+		}
+		mtime := itemModifyDate(it)
+		if mtime.IsZero() {
+			// Sony-style MTP path "Storage Media/2026-02-01/x.JPG" — the
+			// parent folder IS the capture date.
+			if t, ok := dateFromPath(relPath); ok {
+				mtime = t
+			}
 		}
 		*out = append(*out, massstorage.MediaFile{
 			Name:         name,
 			Size:         itemSize(it),
-			DateModified: itemModifyDate(it),
+			DateModified: mtime,
 			RelPath:      relPath,
 			IsVideo:      isVideoExt(name),
 		})
@@ -354,10 +397,31 @@ func (s *Source) walkFolder(folder *ole.IDispatch, rel string, out *[]massstorag
 	return nil
 }
 
-var videoExt = map[string]bool{"MP4": true, "MTS": true, "AVCHD": true, "MOV": true, "LRV": true, "MKV": true, "M2TS": true}
+var videoExt = map[string]bool{"MP4": true, "MTS": true, "AVCHD": true, "MOV": true, "LRV": true, "MKV": true, "M2TS": true, "M2T": true, "MPG": true, "VOB": true, "3GP": true}
+var photoExt = map[string]bool{"ARW": true, "JPG": true, "JPEG": true, "HEIF": true, "HIF": true, "DNG": true, "RAW": true, "CR2": true, "CR3": true, "NEF": true, "RAF": true, "ORF": true, "RW2": true, "PNG": true, "TIFF": true, "TIF": true, "BMP": true, "GIF": true, "WEBP": true}
 
 func isVideoExt(name string) bool {
 	return videoExt[strings.ToUpper(strings.TrimPrefix(filepath.Ext(name), "."))]
+}
+
+// dateFromPath extracts a YYYY-MM-DD date from any path segment — MTP
+// devices commonly name folders by capture date (e.g. "Storage
+// Media/2026-02-01/x.JPG").
+func dateFromPath(relPath string) (time.Time, bool) {
+	for _, seg := range strings.Split(relPath, "/") {
+		if t, err := time.Parse("2006-01-02", seg); err == nil && t.Year() >= 1990 {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// isMediaExt gates enumeration to photo/video files — MTP trees can contain
+// non-media junk (XML, BIN, THM) that downstream file-type filters would
+// drop anyway; skipping here keeps the COM walk cheap.
+func isMediaExt(name string) bool {
+	ext := strings.ToUpper(strings.TrimPrefix(filepath.Ext(name), "."))
+	return videoExt[ext] || photoExt[ext]
 }
 
 // findItem locates a file by its RelPath inside the device tree.
@@ -372,8 +436,8 @@ func (s *Source) findItem(shell *ole.IDispatch, relPath string) (*ole.IDispatch,
 		return nil, err
 	}
 	parts := strings.Split(strings.Trim(relPath, "/"), "/")
-	// parts[0] is the device name itself; skip it
-	for _, part := range parts[1:] {
+	// relPath is <storage>/<folder>/.../<file> — descend through all segments.
+	for pi, part := range parts {
 		items, count, err := folderItems(cur)
 		if err != nil {
 			cur.Release()
@@ -397,7 +461,17 @@ func (s *Source) findItem(shell *ole.IDispatch, relPath string) (*ole.IDispatch,
 			return nil, fmt.Errorf("path segment %q not found under %q", part, relPath)
 		}
 		cur.Release()
-		cur = next
+		// Last segment is the file itself — return the FolderItem as-is.
+		if pi == len(parts)-1 {
+			return next, nil
+		}
+		// Intermediate segment: FolderItem → Folder so Items can enumerate.
+		nextFolder, err := itemSubFolder(next)
+		next.Release()
+		if err != nil {
+			return nil, fmt.Errorf("open folder %q: %w", part, err)
+		}
+		cur = nextFolder
 	}
 	return cur, nil
 }
@@ -409,8 +483,16 @@ func (s *Source) CopyTo(ctx context.Context, f massstorage.MediaFile, destPath s
 		if !overwrite {
 			return info.Size(), true, nil
 		}
-		if f.Size > 0 && info.Size() == f.Size {
+		// MTP Size is unreliable (often 0) — when it can't be compared,
+		// existence is enough (camera file names are unique).
+		if f.Size <= 0 || info.Size() == f.Size {
 			return info.Size(), true, nil
+		}
+		// CopyHere shows a modal "Replace or Don't copy" dialog when the
+		// target exists — that blocks the COM worker forever. Delete the
+		// existing file first so Shell never hits a name conflict.
+		if err := os.Remove(destPath); err != nil {
+			return 0, false, fmt.Errorf("remove existing %s: %w", destPath, err)
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {

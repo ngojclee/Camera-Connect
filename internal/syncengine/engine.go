@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ngojclee/camera-connect/internal/backup"
 	"github.com/ngojclee/camera-connect/internal/camera/massstorage"
@@ -138,7 +139,9 @@ func SyncDevice(ctx context.Context, dev detect.Device, deps *Deps) (*Result, er
 			continue
 		}
 		// Exists + overwrite: same-size file is still skipped (idempotent).
-		if info, err := os.Stat(finalDest); err == nil && overwrite && info.Size() == f.Size {
+		// MTP often reports Size=0 — can't compare, so existence alone wins
+		// (camera file names are unique; Python version used the same rule).
+		if info, err := os.Stat(finalDest); err == nil && overwrite && (f.Size <= 0 || info.Size() == f.Size) {
 			res.Skipped++
 			skippedByDate[f.DateModified.Format("2006-01-02")]++
 			recordFile(ctx, deps, f, dev.Model, profile.ID, destRel)
@@ -204,7 +207,11 @@ func destRelFor(profile *config.Profile, camera string, f massstorage.MediaFile)
 			tmpl = profile.VideoTemplate
 		}
 	}
-	folder := RenderTemplate(tmpl, camera, fileType, f.DateModified)
+	dt := f.DateModified
+	if dt.IsZero() {
+		dt = time.Now()
+	}
+	folder := RenderTemplate(tmpl, camera, fileType, dt)
 	return filepath.Join(folder, f.Name)
 }
 

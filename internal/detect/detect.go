@@ -105,7 +105,12 @@ func (w *Watcher) scanOnce(ctx context.Context) {
 
 	w.mu.Lock()
 	for id, dev := range current {
-		if _, ok := w.devices[id]; !ok {
+		if existing, ok := w.devices[id]; ok {
+			// Same device still connected — refresh mutable fields (driver
+			// status/model change on re-enumeration, e.g. after driver repair).
+			w.devices[id] = dev
+			_ = existing
+		} else {
 			w.devices[id] = dev
 			if w.hooks.OnConnect != nil {
 				w.hooks.OnConnect(dev)

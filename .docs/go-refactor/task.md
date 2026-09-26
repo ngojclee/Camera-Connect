@@ -35,7 +35,7 @@
 - [x] **Hardware gate PASSED 2026-09-26** (commit `08810bc`): real Sony SD card (`G:\`) — filtered 2 WPD/USBSTOR ghost entries; `sync-now` copied **47 files** (JPG + MP4 ~2.5GB incl. 800MB videos) → `D:\Temp\CameraImport\Camera Card\2026\2026-02-01\` via `.part`+rename; second sync skipped all 47; 0 failures, 0 orphan .part files
 - [x] `save-config` accepts `profiles`/`profile_paths`/`file_type_*` patch fields (was missing — profiles could never be saved)
 
-## Phase 3 — MTP ✅ CODE COMPLETE (2026-09-26, hardware gate pending)
+## Phase 3 — MTP ✅ DONE (2026-09-26, hardware-validated on ZV-E10)
 - [x] `internal/camera/mtp`: `go-ole` Shell.Application — all COM on one OS-locked worker goroutine per Source (apartment-safe); `NameSpace(17)` This PC enumeration, device match by PNP-device-id path or model name
 - [x] `ListMedia` recursive walk collecting files under DCIM/PRIVATE paths (brand-agnostic, skips THMBNL/THUMBNAIL)
 - [x] `CopyTo` → `Folder.CopyHere(item, 9748)` + `waitSettled` size-stable check (3×500ms, 10min cap) — truncated-upload race impossible; post-copy size verify
@@ -43,7 +43,7 @@
 - [x] `syncengine.MediaSource` interface — massstorage + MTP unified; engine syncs either mode
 - [x] Agent: MTP devices get auto-sync loops + manual scan-now support
 - [x] `go build/test/vet` all clean; agent runs WMI portable-device scan without errors
-- [ ] Hardware gate pending owner: ILCE-7RM3 + NEX-5R + ZV-E10 list/download over MTP (needs physical camera)
+- [x] Hardware gate PASSED on ZV-E10 (2026-09-26): enumerate 47 files, copy 2.6GB incl. 800MB MP4, idempotent skip pass 47/47, no dialogs
 
 ## Phase 4 — Upload pipeline v2 ✅ (2026-09-26)
 - [x] Staging route: backup-enabled profiles write `<base>/_staging/<id>/<destRel>` (same volume); syncengine skips camera re-copy when staged copy exists
