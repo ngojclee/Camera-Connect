@@ -54,6 +54,20 @@ const state: {
 const app = document.getElementById("app")!;
 const COLOR: Record<string, string> = { green: "#22c55e", blue: "#0ea5e9", orange: "#f59e0b", red: "#ef4444" };
 
+/* Input drafts survive the periodic innerHTML re-render — without this the
+   3s refresh wipes whatever the user is typing (and kills IME composition). */
+const drafts: Record<string, string> = {};
+const isTextField = (el: EventTarget | null): el is HTMLInputElement | HTMLTextAreaElement =>
+  el instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit"].includes(el.type)
+  || el instanceof HTMLTextAreaElement;
+app.addEventListener("input", e => {
+  const el = e.target as HTMLInputElement;
+  if (!el.id) return;
+  if (el instanceof HTMLInputElement && el.type === "checkbox") drafts[el.id] = el.checked ? "1" : "0";
+  else if (isTextField(el) || el instanceof HTMLSelectElement) drafts[el.id] = el.value;
+});
+function clearDrafts(prefix: string): void { for (const k of Object.keys(drafts)) if (k.startsWith(prefix)) delete drafts[k]; }
+
 function esc(s: string): string { const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
 function badge(color: string, text: string): string {
   return `<span class="cc-badge"><span class="dot" style="background:${COLOR[color] ?? "#666"}"></span>${esc(text)}</span>`;
@@ -325,6 +339,12 @@ function panelAbout(): string {
 
 /* ---------- render ---------- */
 function render(): void {
+  // Remember what the user was doing before we rewrite the DOM.
+  const active = document.activeElement as HTMLInputElement | null;
+  const activeId = active?.id ?? "";
+  const selStart = active?.selectionStart ?? null;
+  const selEnd = active?.selectionEnd ?? null;
+
   const s = state.status;
   const online = isWailsRuntime() && s !== undefined;
   const body =
@@ -358,6 +378,21 @@ function render(): void {
       <div class="cc-body">${state.notice ? `<div class="cc-card cc-notice">${esc(state.notice)}</div>` : ""}${body}</div>
     </div>
   </div>`;
+
+  // Restore input drafts, then focus + caret.
+  document.querySelectorAll<HTMLInputElement>("input[id],textarea[id],select[id]").forEach(el => {
+    const d = drafts[el.id];
+    if (d === undefined) return;
+    if (el instanceof HTMLInputElement && el.type === "checkbox") el.checked = d === "1";
+    else el.value = d;
+  });
+  if (activeId) {
+    const el = document.getElementById(activeId) as HTMLInputElement | null;
+    if (el) {
+      el.focus();
+      try { if (selStart !== null) el.setSelectionRange(selStart, selEnd); } catch { /* non-text input */ }
+    }
+  }
   wire();
 }
 
@@ -401,7 +436,7 @@ function wire(): void {
       toast("Profile activated"); refresh();
     }));
   document.querySelectorAll("[data-edit]").forEach(el =>
-    el.addEventListener("click", () => { state.editingProfile = (el as HTMLElement).dataset.edit; render(); }));
+    el.addEventListener("click", () => { clearDrafts("pf-"); state.editingProfile = (el as HTMLElement).dataset.edit; render(); }));
   document.querySelectorAll("[data-del]").forEach(el =>
     el.addEventListener("click", async () => {
       const id = (el as HTMLElement).dataset.del!;
@@ -409,7 +444,7 @@ function wire(): void {
       const cfg = state.config ?? {};
       await saveProfiles((cfg.profiles ?? []).filter(p => p.id !== id), cfg);
     }));
-  document.getElementById("pf-cancel")?.addEventListener("click", () => { state.editingProfile = undefined; render(); });
+  document.getElementById("pf-cancel")?.addEventListener("click", () => { clearDrafts("pf-"); state.editingProfile = undefined; render(); });
   document.getElementById("pf-backup")?.addEventListener("change", e => {
     const f = document.getElementById("pf-backup-fields"); if (f) f.style.display = (e.target as HTMLInputElement).checked ? "grid" : "none";
   });
@@ -432,6 +467,7 @@ function wire(): void {
     const paths = { ...(cfg.profile_paths ?? {}) };
     paths[id] = (document.getElementById("pf-path") as HTMLInputElement).value;
     state.editingProfile = undefined;
+    clearDrafts("pf-");
     await saveProfiles(profiles, cfg, undefined, paths);
   });
 
@@ -445,6 +481,7 @@ function wire(): void {
     const email = (document.getElementById("db-email") as HTMLInputElement).value;
     const password = (document.getElementById("db-pass") as HTMLInputElement).value;
     const r = await execAction("appdb-login", JSON.stringify({ email, password }));
+    if (r.ok) clearDrafts("db-"); // don't keep the password draft around
     toast(r.ok ? "Signed in" : (r.error ?? "login failed")); lazyLoad(); render();
   });
   document.getElementById("btn-logout")?.addEventListener("click", async () => {
@@ -453,11 +490,13 @@ function wire(): void {
   document.getElementById("btn-vpush")?.addEventListener("click", async () => {
     const passphrase = (document.getElementById("vault-pass") as HTMLInputElement).value;
     const r = await execAction("vault-push", JSON.stringify({ passphrase }));
+    clearDrafts("vault-");
     toast(r.ok ? "rclone.conf pushed (sealed)" : (r.error ?? "push failed"));
   });
   document.getElementById("btn-vpull")?.addEventListener("click", async () => {
     const passphrase = (document.getElementById("vault-pass") as HTMLInputElement).value;
     const r = await execAction("vault-pull", JSON.stringify({ passphrase }));
+    clearDrafts("vault-");
     toast(r.ok ? "rclone.conf pulled + written" : (r.error ?? "pull failed"));
   });
 
@@ -536,9 +575,13 @@ async function refresh(): Promise<void> {
     }
     if (state.logs.length > 2000) state.logs = state.logs.slice(-1000);
   }
-  render();
-  const lv = document.getElementById("log-view");
-  if (lv) lv.scrollTop = lv.scrollHeight;
+  // Don't rewrite the DOM while the user is typing — drafts still capture
+  // values, and the next interaction/user render will paint fresh state.
+  if (!isTextField(document.activeElement)) {
+    render();
+    const lv = document.getElementById("log-view");
+    if (lv) lv.scrollTop = lv.scrollHeight;
+  }
 }
 
 render();
