@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -335,6 +336,14 @@ func main() {
 		resumeDetector.Run(ctx)
 	})
 
+	// --- AppDB: shared service + heartbeat/settings loop ---
+	appdbSvc := newAppDBService(cfgMgr, machineName)
+	if appdbSvc != nil {
+		startManaged(ctx, &wg, "appdb-loop", func(ctx context.Context) {
+			runAppDBLoop(ctx, appdbSvc, cfgMgr, db)
+		})
+	}
+
 	// --- IPC server (UI <-> Agent) ---
 	shutdownCh := make(chan struct{}, 1)
 	ipcServer := ipc.NewServer(ipc.PipeName, ipc.DefaultRequestTimeout, func(reqCtx context.Context, req ipc.Request) ipc.Response {
@@ -348,7 +357,7 @@ func main() {
 			syncDeps:      syncDeps,
 			uploadWorker:  uploadWorker,
 			batcher:       batcher,
-			appdbSvc:      newAppDBService(cfgMgr, machineName),
+			appdbSvc:      appdbSvc,
 			shutdownCh:    shutdownCh,
 			updateChecker: updateChecker,
 			updateMu:      &updateMu,
@@ -457,6 +466,10 @@ func dispatchCommand(reqCtx context.Context, req ipc.Request, d *agentDeps) ipc.
 			if err := startupMgr.SetEnabled(updated.General.StartWithWindows, d.exePath, updated.General.StartMinimized); err != nil {
 				log.Printf("[WARN] Failed to apply startup registry after save_config: %v", err)
 			}
+		}
+		// Mirror the new config to AppDB (best-effort, offline-safe).
+		if d.appdbSvc != nil {
+			go appdbPushSettings(context.Background(), d.appdbSvc, d.cfgMgr, d.db)
 		}
 		return ipc.Response{Success: true, Data: configToIPCSnapshot(d.cfgMgr), Code: ipc.CodeOK}
 
@@ -714,6 +727,12 @@ func dispatchCommand(reqCtx context.Context, req ipc.Request, d *agentDeps) ipc.
 		}
 		d.appState.SetAppDBConnected(true)
 		log.Printf("[INFO] AppDB logged in: %s", payload.Email)
+		// First sync right after login: pull remote config, then push ours
+		// so this machine's device_paths/settings exist server-side.
+		go func() {
+			appdbPullSettings(context.Background(), d.appdbSvc, d.cfgMgr, d.db)
+			appdbPushSettings(context.Background(), d.appdbSvc, d.cfgMgr, d.db)
+		}()
 		return ipc.Response{Success: true, Data: map[string]string{"email": payload.Email}, Code: ipc.CodeOK}
 
 	case ipc.CmdAppDBLogout:
@@ -1313,5 +1332,123 @@ func toIPCUpdateResult(release updatepkg.LatestRelease, downloadInProgress bool)
 		AssetURL:           strings.TrimSpace(release.AssetURL),
 		CheckedAt:          strings.TrimSpace(release.CheckedAt),
 		DownloadInProgress: downloadInProgress,
+	}
+}
+
+// ---------- AppDB heartbeat + settings sync ----------
+
+// runAppDBLoop heartbeats the installation every 5 minutes and pulls remote
+// settings whose revision is newer than the last applied locally.
+func runAppDBLoop(ctx context.Context, svc *appdb.Service, cfgMgr *config.Manager, db *store.Store) {
+	// Initial pass shortly after start — a restored session may already be
+	// logged in; pull remote settings before the first heartbeat matters.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(15 * time.Second):
+	}
+	appdbTick(ctx, svc, cfgMgr, db)
+
+	t := time.NewTicker(5 * time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			appdbTick(ctx, svc, cfgMgr, db)
+		}
+	}
+}
+
+func appdbTick(ctx context.Context, svc *appdb.Service, cfgMgr *config.Manager, db *store.Store) {
+	loggedIn, _, _ := svc.Status()
+	if !loggedIn {
+		return
+	}
+	if err := svc.Heartbeat(ctx); err != nil {
+		log.Printf("[WARN] appdb heartbeat: %v", err)
+	}
+	appdbPullSettings(ctx, svc, cfgMgr, db)
+}
+
+// revKey prefixes kv-stored last-applied remote revisions.
+func appdbRevKey(settingKey string) string { return "appdb_rev:" + settingKey }
+
+// appdbPullSettings applies newer remote revisions of the user-scoped config
+// keys. device_paths is push-only (it IS this machine's record).
+func appdbPullSettings(ctx context.Context, svc *appdb.Service, cfgMgr *config.Manager, db *store.Store) {
+	for _, key := range []string{appdb.KeySharedConfig, appdb.KeyProfileDefs} {
+		set, err := svc.GetSetting(ctx, "user", key)
+		if err != nil || set == nil {
+			continue
+		}
+		stored, _ := db.GetKV(ctx, appdbRevKey(key))
+		storedRev, _ := strconv.Atoi(stored)
+		if set.Revision <= storedRev {
+			continue
+		}
+		var patch ipc.SaveConfigPayload
+		if err := json.Unmarshal(set.Value, &patch); err != nil {
+			log.Printf("[WARN] appdb pull %s: malformed value: %v", key, err)
+			continue
+		}
+		// Never apply machine-local bits from a remote doc.
+		patch.ProfilePaths = nil
+		if err := applyConfigPatch(cfgMgr, patch); err != nil {
+			log.Printf("[WARN] appdb pull %s: apply failed: %v", key, err)
+			continue
+		}
+		_ = db.SetKV(ctx, appdbRevKey(key), strconv.Itoa(set.Revision))
+		log.Printf("[INFO] appdb: applied remote %s (rev %d)", key, set.Revision)
+	}
+}
+
+// appdbPushSettings uploads current config to user/device scopes — called
+// after save-config and login so the cloud copy mirrors local state.
+func appdbPushSettings(ctx context.Context, svc *appdb.Service, cfgMgr *config.Manager, db *store.Store) {
+	shared := cfgMgr.Shared()
+	local := cfgMgr.Local()
+
+	sharedDoc := map[string]any{
+		"scan_mode":          shared.General.ScanMode,
+		"poll_interval":      shared.General.PollInterval,
+		"sync_mode":          shared.General.SyncMode,
+		"overwrite_existing": shared.General.OverwriteExisting,
+		"auto_sync":          shared.General.AutoSync,
+		"start_with_windows": shared.General.StartWithWindows,
+		"start_minimized":    shared.General.StartMinimized,
+		"minimize_to_tray":   shared.General.MinimizeToTray,
+		"notify_on_connect":  shared.Notifications.OnConnect,
+		"notify_on_complete": shared.Notifications.OnComplete,
+		"file_type_photos":   shared.FileTypes.Photos,
+		"file_type_videos":   shared.FileTypes.Videos,
+	}
+	profileDefs := map[string]any{
+		"profiles":       shared.Profiles,
+		"active_profile": shared.ActiveProfile,
+	}
+	devicePaths := map[string]any{
+		"machine":       local.MachineName,
+		"profile_paths": local.ProfilePaths,
+		"rclone_path":   local.RclonePath,
+	}
+
+	type pushItem struct {
+		scope string
+		key   string
+		val   any
+	}
+	for _, it := range []pushItem{
+		{"user", appdb.KeySharedConfig, sharedDoc},
+		{"user", appdb.KeyProfileDefs, profileDefs},
+		{"device", appdb.KeyDevicePaths, devicePaths},
+	} {
+		rev, err := svc.PushSettingValue(ctx, it.scope, it.key, it.val)
+		if err != nil {
+			log.Printf("[WARN] appdb push %s: %v", it.key, err)
+			continue
+		}
+		_ = db.SetKV(ctx, appdbRevKey(it.key), strconv.Itoa(rev))
 	}
 }

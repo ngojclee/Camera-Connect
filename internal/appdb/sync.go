@@ -142,6 +142,37 @@ func (s *Service) requireContext() (*Session, *Context, error) {
 	return sess, c, nil
 }
 
+// Heartbeat pings the server-side installation row — lets AppDB know this
+// installation is alive and surfaces its app version.
+func (s *Service) Heartbeat(ctx context.Context) error {
+	sess, c, err := s.requireContext()
+	if err != nil {
+		return err
+	}
+	return s.client.Heartbeat(ctx, sess, c.InstallationID, 0, s.version)
+}
+
+// PushSettingValue upserts one scoped key with read-modify-write revision
+// handling; retries once on ErrRevisionConflict by re-reading the remote rev.
+func (s *Service) PushSettingValue(ctx context.Context, scopeType, key string, value any) (int, error) {
+	existing, err := s.GetSetting(ctx, scopeType, key)
+	if err != nil {
+		return 0, err
+	}
+	rev := 0
+	if existing != nil {
+		rev = existing.Revision
+	}
+	newRev, err := s.UpsertSetting(ctx, scopeType, key, value, rev)
+	if err == ErrRevisionConflict {
+		// Someone else wrote between our read and write — retry once.
+		if existing, rerr := s.GetSetting(ctx, scopeType, key); rerr == nil && existing != nil {
+			return s.UpsertSetting(ctx, scopeType, key, value, existing.Revision)
+		}
+	}
+	return newRev, err
+}
+
 // ---------- settings sync ----------
 
 // GetSetting reads a scoped setting (nil when absent).
