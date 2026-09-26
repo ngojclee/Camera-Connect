@@ -55,42 +55,84 @@ func (s *Service) Login(ctx context.Context, email, password string) error {
 	s.session = sess
 	s.mu.Unlock()
 
-	// Pick the first available tenant (single-tenant users get enrolled
-	// immediately; multi-tenant UX lands in Phase 6 device picker).
 	if s.ctx == nil {
-		tenants, err := s.client.Tenants(ctx, sess)
-		if err == nil && len(tenants) == 0 {
-			// First login ever — create a personal tenant so enrollment has
-			// somewhere to land (mirrors LNC-Proxy first-run behavior).
-			slug := "user-" + tenantSlugFromEmail(email)
-			if tid, cerr := s.client.CreateTenant(ctx, sess, slug, s.machineLabel); cerr == nil {
-				tenants = []struct {
-					TenantID string `json:"tenant_id"`
-					Role     string `json:"role"`
-					Status   string `json:"status"`
-				}{{TenantID: tid, Role: "owner", Status: "active"}}
-			}
+		if err := s.enroll(ctx, sess, email); err != nil {
+			return err
 		}
-		if err == nil {
-			for _, t := range tenants {
-				if t.Status == "active" || t.Status == "" {
-					enrolled, err := s.client.EnrollInstallation(ctx, sess, t.TenantID, s.machineLabel, s.version)
-					if err == nil {
-						s.mu.Lock()
-						s.ctx = &Context{
-							TenantID:           enrolled.TenantID,
-							ExtensionID:        enrolled.ExtensionID,
-							DeviceEnrollmentID: enrolled.DeviceEnrollmentID,
-							InstallationID:     enrolled.InstallationID,
-							InstallationKey:    installationKey(),
-							MachineLabel:       s.machineLabel,
-						}
-						s.mu.Unlock()
-					}
-					break
-				}
-			}
+	}
+	return s.persist()
+}
+
+// enroll picks (or creates) a tenant and registers this installation.
+// Every failure surfaces — a login without enrollment previously failed
+// silently and left every later RPC returning "not enrolled".
+func (s *Service) enroll(ctx context.Context, sess *Session, email string) error {
+	tenants, err := s.client.Tenants(ctx, sess)
+	if err != nil {
+		return fmt.Errorf("appdb: list tenants: %w", err)
+	}
+	if len(tenants) == 0 {
+		// First login ever — create a personal tenant so enrollment has
+		// somewhere to land (mirrors LNC-Proxy first-run behavior).
+		slug := "user-" + tenantSlugFromEmail(email)
+		tid, err := s.client.CreateTenant(ctx, sess, slug, s.machineLabel)
+		if err != nil {
+			return fmt.Errorf("appdb: create tenant: %w", err)
 		}
+		tenants = []struct {
+			TenantID string `json:"tenant_id"`
+			Role     string `json:"role"`
+			Status   string `json:"status"`
+		}{{TenantID: tid, Role: "owner", Status: "active"}}
+	}
+	var lastErr error
+	for _, t := range tenants {
+		if t.Status != "active" && t.Status != "" {
+			continue
+		}
+		enrolled, err := s.client.EnrollInstallation(ctx, sess, t.TenantID, s.machineLabel, s.version)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		s.mu.Lock()
+		s.ctx = &Context{
+			TenantID:           enrolled.TenantID,
+			ExtensionID:        enrolled.ExtensionID,
+			DeviceEnrollmentID: enrolled.DeviceEnrollmentID,
+			InstallationID:     enrolled.InstallationID,
+			InstallationKey:    installationKey(),
+			MachineLabel:       s.machineLabel,
+		}
+		s.mu.Unlock()
+		break
+	}
+	if s.ctx == nil {
+		if lastErr != nil {
+			return fmt.Errorf("appdb: enroll installation: %w", lastErr)
+		}
+		return fmt.Errorf("appdb: no active tenant to enroll into")
+	}
+	return nil
+}
+
+// EnsureEnrolled lazily enrolls when a restored session has no context —
+// e.g. an earlier login enrolled nothing, or a persisted session predates
+// the enrollment context.
+func (s *Service) EnsureEnrolled(ctx context.Context) error {
+	s.mu.Lock()
+	need := s.ctx == nil
+	s.mu.Unlock()
+	if !need {
+		return nil
+	}
+	sess, err := s.sessionOrRefresh(ctx)
+	if err != nil {
+		return err
+	}
+	email := sess.Email
+	if err := s.enroll(ctx, sess, email); err != nil {
+		return err
 	}
 	return s.persist()
 }

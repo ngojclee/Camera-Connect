@@ -2,11 +2,11 @@ package appdb
 
 import (
 	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -121,9 +121,13 @@ func installationKey() string {
 			return
 		}
 		path := filepath.Join(local, "CameraConnect", "secrets", "installation.key")
-		if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
-			instKey = string(data)
-			return
+		if data, err := os.ReadFile(path); err == nil {
+			// Legacy keys ("cc_<hex>") predate the uuid-typed server column —
+			// regenerate so enrollment stops failing with 22P02.
+			if k := strings.TrimSpace(string(data)); isUUID(k) {
+				instKey = k
+				return
+			}
 		}
 		instKey = randomKey()
 		_ = os.MkdirAll(filepath.Dir(path), 0o700)
@@ -132,8 +136,31 @@ func installationKey() string {
 	return instKey
 }
 
+// randomKey returns a UUIDv4 — the server column is uuid-typed, so an
+// opaque prefix like "cc_<hex>" fails with 22P02 (learned the hard way).
 func randomKey() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
-	return "cc_" + hex.EncodeToString(b)
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+func isUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, r := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+				return false
+			}
+		}
+	}
+	return true
 }

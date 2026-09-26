@@ -339,6 +339,10 @@ func main() {
 	// --- AppDB: shared service + heartbeat/settings loop ---
 	appdbSvc := newAppDBService(cfgMgr, machineName)
 	if appdbSvc != nil {
+		// A persisted session survives restarts — reflect it in status.
+		if loggedIn, _, _ := appdbSvc.Status(); loggedIn {
+			appState.SetAppDBConnected(true)
+		}
 		startManaged(ctx, &wg, "appdb-loop", func(ctx context.Context) {
 			runAppDBLoop(ctx, appdbSvc, cfgMgr, db)
 		})
@@ -1380,9 +1384,16 @@ func appdbTick(ctx context.Context, svc *appdb.Service, cfgMgr *config.Manager, 
 	if !loggedIn {
 		return
 	}
+	// A persisted session may lack enrollment (earlier silent failure) —
+	// retry it before heartbeat so the loop self-heals.
+	if err := svc.EnsureEnrolled(ctx); err != nil {
+		log.Printf("[WARN] appdb enroll retry: %v", err)
+		return
+	}
 	if err := svc.Heartbeat(ctx); err != nil {
 		log.Printf("[WARN] appdb heartbeat: %v", err)
 	}
+	appdbSeed(ctx, svc, cfgMgr, db)
 	appdbPullSettings(ctx, svc, cfgMgr, db)
 }
 
@@ -1418,51 +1429,72 @@ func appdbPullSettings(ctx context.Context, svc *appdb.Service, cfgMgr *config.M
 	}
 }
 
+// appdbSeed pushes local settings to keys that don't exist remotely yet —
+// runs every tick but no-ops once the server has a copy (rev ≥ 1 stored).
+func appdbSeed(ctx context.Context, svc *appdb.Service, cfgMgr *config.Manager, db *store.Store) {
+	for _, key := range []string{appdb.KeySharedConfig, appdb.KeyProfileDefs, appdb.KeyDevicePaths} {
+		if v, _ := db.GetKV(ctx, appdbRevKey("seeded:"+key)); v == "1" {
+			continue
+		}
+		scope := "user"
+		if key == appdb.KeyDevicePaths {
+			scope = "device"
+		}
+		remote, err := svc.GetSetting(ctx, scope, key)
+		if err != nil {
+			continue
+		}
+		if remote != nil {
+			// Exists remotely → record rev so pull can pick it up; mark seeded.
+			_ = db.SetKV(ctx, appdbRevKey("seeded:"+key), "1")
+			continue
+		}
+		appdbPushOne(ctx, svc, cfgMgr, db, scope, key)
+	}
+}
+
+// appdbPushOne upserts a single scope/key and records the returned rev.
+func appdbPushOne(ctx context.Context, svc *appdb.Service, cfgMgr *config.Manager, db *store.Store, scope, key string) {
+	shared := cfgMgr.Shared()
+	local := cfgMgr.Local()
+	var val any
+	switch key {
+	case appdb.KeySharedConfig:
+		val = map[string]any{
+			"scan_mode":          shared.General.ScanMode,
+			"poll_interval":      shared.General.PollInterval,
+			"sync_mode":          shared.General.SyncMode,
+			"overwrite_existing": shared.General.OverwriteExisting,
+			"auto_sync":          shared.General.AutoSync,
+			"start_with_windows": shared.General.StartWithWindows,
+			"start_minimized":    shared.General.StartMinimized,
+			"minimize_to_tray":   shared.General.MinimizeToTray,
+			"notify_on_connect":  shared.Notifications.OnConnect,
+			"notify_on_complete": shared.Notifications.OnComplete,
+			"file_type_photos":   shared.FileTypes.Photos,
+			"file_type_videos":   shared.FileTypes.Videos,
+		}
+	case appdb.KeyProfileDefs:
+		val = map[string]any{"profiles": shared.Profiles, "active_profile": shared.ActiveProfile}
+	case appdb.KeyDevicePaths:
+		val = map[string]any{"machine": local.MachineName, "profile_paths": local.ProfilePaths, "rclone_path": local.RclonePath}
+	default:
+		return
+	}
+	rev, err := svc.PushSettingValue(ctx, scope, key, val)
+	if err != nil {
+		log.Printf("[WARN] appdb push %s: %v", key, err)
+		return
+	}
+	_ = db.SetKV(ctx, appdbRevKey(key), strconv.Itoa(rev))
+	_ = db.SetKV(ctx, appdbRevKey("seeded:"+key), "1")
+	log.Printf("[INFO] appdb: pushed %s (rev %d)", key, rev)
+}
+
 // appdbPushSettings uploads current config to user/device scopes — called
 // after save-config and login so the cloud copy mirrors local state.
 func appdbPushSettings(ctx context.Context, svc *appdb.Service, cfgMgr *config.Manager, db *store.Store) {
-	shared := cfgMgr.Shared()
-	local := cfgMgr.Local()
-
-	sharedDoc := map[string]any{
-		"scan_mode":          shared.General.ScanMode,
-		"poll_interval":      shared.General.PollInterval,
-		"sync_mode":          shared.General.SyncMode,
-		"overwrite_existing": shared.General.OverwriteExisting,
-		"auto_sync":          shared.General.AutoSync,
-		"start_with_windows": shared.General.StartWithWindows,
-		"start_minimized":    shared.General.StartMinimized,
-		"minimize_to_tray":   shared.General.MinimizeToTray,
-		"notify_on_connect":  shared.Notifications.OnConnect,
-		"notify_on_complete": shared.Notifications.OnComplete,
-		"file_type_photos":   shared.FileTypes.Photos,
-		"file_type_videos":   shared.FileTypes.Videos,
-	}
-	profileDefs := map[string]any{
-		"profiles":       shared.Profiles,
-		"active_profile": shared.ActiveProfile,
-	}
-	devicePaths := map[string]any{
-		"machine":       local.MachineName,
-		"profile_paths": local.ProfilePaths,
-		"rclone_path":   local.RclonePath,
-	}
-
-	type pushItem struct {
-		scope string
-		key   string
-		val   any
-	}
-	for _, it := range []pushItem{
-		{"user", appdb.KeySharedConfig, sharedDoc},
-		{"user", appdb.KeyProfileDefs, profileDefs},
-		{"device", appdb.KeyDevicePaths, devicePaths},
-	} {
-		rev, err := svc.PushSettingValue(ctx, it.scope, it.key, it.val)
-		if err != nil {
-			log.Printf("[WARN] appdb push %s: %v", it.key, err)
-			continue
-		}
-		_ = db.SetKV(ctx, appdbRevKey(it.key), strconv.Itoa(rev))
-	}
+	appdbPushOne(ctx, svc, cfgMgr, db, "user", appdb.KeySharedConfig)
+	appdbPushOne(ctx, svc, cfgMgr, db, "user", appdb.KeyProfileDefs)
+	appdbPushOne(ctx, svc, cfgMgr, db, "device", appdb.KeyDevicePaths)
 }
