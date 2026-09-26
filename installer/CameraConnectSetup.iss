@@ -23,7 +23,7 @@
 #endif
 
 [Setup]
-AppId={{8EDE9ED8-3514-492D-AF64-4E5FC856D636}
+AppId={{3C9D7D7F-6942-461D-A2AC-286668079728}
 AppName=Camera Connect
 AppVersion={#AppVersion}
 AppVerName=Camera Connect {#AppVersion}
