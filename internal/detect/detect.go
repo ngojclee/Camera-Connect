@@ -2,6 +2,7 @@
 // Two source kinds:
 //   - mass_storage: removable drive letters containing DCIM/PRIVATE folders
 //   - mtp:          portable devices (WPD) visible via Win32_PnPEntity
+//
 // The Watcher polls on an interval and emits connect/disconnect callbacks.
 package detect
 
@@ -28,6 +29,10 @@ type Device struct {
 	DriveLetter string // mass storage only, e.g. "E:\\"
 	PNPDeviceID string // raw PNP id (mtp) or correlated disk id
 	Label       string // volume label (mass storage)
+	// MTP only: driver health — "Error" with ErrorCode means the OS can't
+	// expose the device to Shell (e.g. Code 19 registry corruption).
+	DriverStatus string
+	DriverError  uint32
 }
 
 // Hooks receives device events.
@@ -39,11 +44,11 @@ type Hooks struct {
 
 // Watcher polls for devices and diffs state.
 type Watcher struct {
-	mu        sync.Mutex
-	devices   map[string]Device
-	hooks     Hooks
-	interval  time.Duration
-	scan      func(ctx context.Context) ([]Device, error)
+	mu       sync.Mutex
+	devices  map[string]Device
+	hooks    Hooks
+	interval time.Duration
+	scan     func(ctx context.Context) ([]Device, error)
 }
 
 // NewWatcher creates a watcher using the platform scan implementation.
@@ -147,10 +152,12 @@ var ScanDevices = func(ctx context.Context) ([]Device, error) {
 	}
 	for _, p := range portables {
 		out = append(out, Device{
-			ID:          "mtp:" + p.PNPDeviceID,
-			Model:       p.Model,
-			Mode:        ModeMTP,
-			PNPDeviceID: p.PNPDeviceID,
+			ID:           "mtp:" + p.PNPDeviceID,
+			Model:        p.Model,
+			Mode:         ModeMTP,
+			PNPDeviceID:  p.PNPDeviceID,
+			DriverStatus: p.Status,
+			DriverError:  p.ErrorCode,
 		})
 	}
 	return out, nil

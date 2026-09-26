@@ -65,6 +65,10 @@ func SyncDevice(ctx context.Context, dev detect.Device, deps *Deps) (*Result, er
 	case detect.ModeMassStorage:
 		src = massstorage.NewHandler(dev.DriveLetter, dev.Model)
 	case detect.ModeMTP:
+		if dev.DriverError != 0 {
+			return res, fmt.Errorf("MTP driver error (Code %d, status %s) — Windows cannot expose %s to Shell. Fix: uninstall the device in Device Manager and re-plug, then retry",
+				dev.DriverError, dev.DriverStatus, dev.Model)
+		}
 		mtpSrc, err := openMTPSource(dev)
 		if err != nil {
 			return res, err

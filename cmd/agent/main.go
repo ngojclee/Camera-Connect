@@ -259,7 +259,15 @@ func main() {
 		batcher.Flush(context.Background())
 	})
 	eventBus.On(coordinator.EvtSyncFailed, func(evt coordinator.InternalEvent) {
+		if r, ok := evt.Payload.(coordinator.SyncResult); ok && r.Error != "" {
+			log.Printf("[ERROR] sync job %s failed: %s", r.JobName, r.Error)
+		}
 		batcher.Flush(context.Background())
+	})
+	eventBus.On(coordinator.EvtSyncCompleted, func(evt coordinator.InternalEvent) {
+		if r, ok := evt.Payload.(coordinator.SyncResult); ok {
+			log.Printf("[INFO] sync job %s completed", r.JobName)
+		}
 	})
 	// Orphaned staged files (crash before flush) → reconcile at startup.
 	go func() {

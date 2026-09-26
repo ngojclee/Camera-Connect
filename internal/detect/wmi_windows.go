@@ -13,7 +13,9 @@ import (
 type PortableDevice struct {
 	PNPDeviceID string
 	Model       string
-	Service     string // e.g. "WUDFWpdFs" for MTP, "USBSTOR" for mass storage
+	Service     string // e.g. "WUDFWpdMtp" for MTP, "WUDFWpdFs" for disk facades
+	Status      string // WMI Status (OK / Error / Degraded...)
+	ErrorCode   uint32 // ConfigManagerErrorCode (0 = fine; e.g. 19 = registry corrupt)
 }
 
 // cameraVIDs maps USB vendor IDs to brand names (multi-brand detection).
@@ -32,21 +34,25 @@ var cameraVIDs = map[string]string{
 
 // pnpEntity is the subset of Win32_PnPEntity we need.
 type pnpEntity struct {
-	DeviceID     string
-	Name         string
-	PNPClass     string
-	Service      string
-	Manufacturer string
+	DeviceID               string
+	Name                   string
+	PNPClass               string
+	Service                string
+	Manufacturer           string
+	Status                 string
+	ConfigManagerErrorCode uint32
 }
 
 // ScanPortableDevices returns MTP/WPD portable devices (cameras in MTP mode).
 // Mass-storage cameras appear as drives instead — those come via ScanDrives.
 func ScanPortableDevices(ctx context.Context) ([]PortableDevice, error) {
 	var devices []pnpEntity
-	// PNPClass=PortableDevice is the canonical WPD class; also catch devices
-	// served by the WPD filesystem driver.
-	query := `SELECT DeviceID, Name, PNPClass, Service, Manufacturer FROM Win32_PnPEntity ` +
-		`WHERE PNPClass = 'PortableDevice' OR Service = 'WUDFWpdFs'`
+	// Modern Windows reports MTP/WPD devices with PNPClass='WPD' and the
+	// WUDFWpdMtp service. WUDFWpdFs entries are filesystem-volume facades for
+	// mass-storage disks (filtered out below via USBSTOR device paths).
+	// Note: WQL has no IN operator — must use explicit ORs.
+	query := `SELECT DeviceID, Name, PNPClass, Service, Manufacturer, Status, ConfigManagerErrorCode FROM Win32_PnPEntity ` +
+		`WHERE PNPClass = 'WPD' OR PNPClass = 'PortableDevice' OR Service = 'WUDFWpdMtp'`
 	if err := wmi.Query(query, &devices); err != nil {
 		return nil, err
 	}
@@ -58,14 +64,23 @@ func ScanPortableDevices(ctx context.Context) ([]PortableDevice, error) {
 		}
 		// Skip mass-storage disks exposed through the WPD filesystem driver —
 		// they carry USBSTOR in the device path and already show up as drives.
-		// Real MTP cameras enumerate under USB\VID_* without a DISK device.
+		// Real MTP cameras enumerate under USB\VID_* with WUDFWpdMtp service.
 		upper := strings.ToUpper(d.DeviceID)
+		isMtpService := strings.EqualFold(d.Service, "WUDFWpdMtp")
 		if strings.Contains(upper, "USBSTOR") || strings.Contains(upper, "#DISK&") {
 			continue
 		}
+		// WUDFWpdFs entries without a real MTP service are disk facades too.
+		if strings.EqualFold(d.Service, "WUDFWpdFs") && !isMtpService {
+			continue
+		}
 		model := strings.TrimSpace(d.Name)
-		if model == "" {
-			model = brandFromDeviceID(d.DeviceID)
+		// Generic WPD names ("MTP USB Device", "WPD FileSystem Volume Driver")
+		// hide the real brand — prefer the VID-derived name when known.
+		if brand := brandFromDeviceID(d.DeviceID); brand != "" &&
+			(model == "" || strings.Contains(strings.ToUpper(model), "MTP") ||
+				strings.Contains(strings.ToUpper(model), "WPD")) {
+			model = brand
 		}
 		if model == "" {
 			model = "Portable Device"
@@ -74,6 +89,8 @@ func ScanPortableDevices(ctx context.Context) ([]PortableDevice, error) {
 			PNPDeviceID: d.DeviceID,
 			Model:       model,
 			Service:     d.Service,
+			Status:      d.Status,
+			ErrorCode:   d.ConfigManagerErrorCode,
 		})
 	}
 	return out, nil

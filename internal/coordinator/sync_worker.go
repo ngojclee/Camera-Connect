@@ -162,7 +162,15 @@ func (w *SyncWorker) process(ctx context.Context, job SyncJob) {
 	}
 	defer stopWatch()
 
-	err := job.Execute(ctx)
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("panic: %v", r)
+			}
+		}()
+		err = job.Execute(ctx)
+	}()
 	if err != nil {
 		w.bus.Emit(InternalEvent{
 			Type: EvtSyncFailed,

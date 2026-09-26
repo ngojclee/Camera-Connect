@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -67,7 +68,11 @@ func Open(pnpID, model string) (*Source, error) {
 func (s *Source) worker() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	_ = ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED)
+	// Shell.Application folder ops require STA (single-threaded apartment) —
+	// MTA returns RPC_E_WRONG_THREAD / silently misbehaves on WPD objects.
+	if err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED); err != nil {
+		log.Printf("[WARN] COM STA init: %v", err)
+	}
 	defer ole.CoUninitialize()
 	for {
 		select {
@@ -194,6 +199,23 @@ func itemModifyDate(item *ole.IDispatch) time.Time {
 	return time.Now()
 }
 
+// pathMatchesPNP reports whether a shell item path contains every identifier
+// token from the PNP device id (VID_*/PID_*/serial/MI_*).
+func pathMatchesPNP(shellPath, pnpID string) bool {
+	for _, tok := range strings.FieldsFunc(pnpID, func(r rune) bool {
+		return r == '\\' || r == '#'
+	}) {
+		tok = strings.ToUpper(strings.TrimSpace(tok))
+		if tok == "" || strings.EqualFold(tok, "USB") || strings.EqualFold(tok, "SWD") {
+			continue
+		}
+		if !strings.Contains(shellPath, tok) {
+			return false
+		}
+	}
+	return true
+}
+
 // ---------- MediaSource impl ----------
 
 // Connect finds the device under "This PC".
@@ -234,7 +256,10 @@ func (s *Source) findDevice(shell *ole.IDispatch) (*ole.IDispatch, error) {
 		}
 		name := itemName(it)
 		path := strings.ToUpper(itemPath(it))
-		if s.pnpID != "" && strings.Contains(path, s.pnpID) {
+		// Shell paths use #-separated form (usb#vid_054c&pid_0d96#serial#...)
+		// while PNP IDs use \-separated (USB\VID_054C&PID_0D96\serial) —
+		// match on the VID/PID/serial tokens extracted from the PNP id.
+		if s.pnpID != "" && pathMatchesPNP(path, s.pnpID) {
 			return it, nil
 		}
 		if strings.EqualFold(name, s.model) {
