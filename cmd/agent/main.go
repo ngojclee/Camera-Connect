@@ -499,6 +499,9 @@ func dispatchCommand(reqCtx context.Context, req ipc.Request, d *agentDeps) ipc.
 		if err != nil {
 			return ipc.Response{Success: false, Error: fmt.Sprintf("invalid scan_now payload: %v", err), Code: ipc.CodeBadRequest}
 		}
+		if payload.Mode != "" && payload.Mode != "copy" && payload.Mode != "move" {
+			return ipc.Response{Success: false, Error: "mode must be 'copy' or 'move'", Code: ipc.CodeBadRequest}
+		}
 		devices := d.watcher.Devices()
 		if len(devices) == 0 {
 			return ipc.Response{Success: false, Error: "no camera connected", Code: ipc.CodeBadRequest}
@@ -508,7 +511,10 @@ func dispatchCommand(reqCtx context.Context, req ipc.Request, d *agentDeps) ipc.
 			if payload.DeviceID != "" && payload.DeviceID != dev.ID {
 				continue
 			}
-			if err := enqueueDeviceSync(d.syncWorker, dev, d.syncDeps, d.appState, "manual_scan", payload.ProfileID); err != nil {
+			if err := enqueueDeviceSync(d.syncWorker, dev, d.syncDeps, d.appState, "manual_scan", syncengine.ScanOptions{
+				ProfileID: payload.ProfileID,
+				Mode:      payload.Mode,
+			}); err != nil {
 				log.Printf("[WARN] enqueue scan for %s failed: %v", dev.ID, err)
 				continue
 			}
@@ -817,7 +823,7 @@ func waitGroupWithTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
 // enqueueDeviceSync queues one sync pass over a device on the single-flight
 // worker. profileID="" uses the shared active profile; a non-empty value is
 // a one-shot override for manual scans (does not touch active_profile).
-func enqueueDeviceSync(worker *coordinator.SyncWorker, dev detect.Device, deps *syncengine.Deps, state *coordinator.AppState, trigger, profileID string) error {
+func enqueueDeviceSync(worker *coordinator.SyncWorker, dev detect.Device, deps *syncengine.Deps, state *coordinator.AppState, trigger string, opts syncengine.ScanOptions) error {
 	jobName := fmt.Sprintf("sync_%s", strings.ReplaceAll(dev.ID, ":", "_"))
 	return worker.Enqueue(coordinator.SyncJob{
 		Name:           jobName,
@@ -826,7 +832,12 @@ func enqueueDeviceSync(worker *coordinator.SyncWorker, dev detect.Device, deps *
 		Execute: func(ctx context.Context) error {
 			state.SetCameraStatus(dev.ID, "syncing")
 			defer state.SetCameraStatus(dev.ID, "idle")
-			res, err := syncengine.SyncDeviceProfile(ctx, dev, deps, profileID)
+			// Bind progress reporting to this device for the job's duration.
+			jobDeps := *deps
+			jobDeps.Progress = func(current, total int, fileName string) {
+				state.SetCameraProgress(dev.ID, current, total, fileName)
+			}
+			res, err := syncengine.SyncDeviceOpts(ctx, dev, &jobDeps, opts)
 			if err != nil {
 				return err
 			}
@@ -868,7 +879,7 @@ func (m *deviceLoopManager) Start(parent context.Context, dev detect.Device) {
 	m.mu.Unlock()
 
 	go func() {
-		_ = enqueueDeviceSync(m.worker, dev, m.deps, m.state, "auto_connect", "")
+		_ = enqueueDeviceSync(m.worker, dev, m.deps, m.state, "auto_connect", syncengine.ScanOptions{})
 		if !strings.EqualFold(shared.General.ScanMode, "continuous") {
 			return // "once" mode: single pass per connect
 		}
@@ -883,7 +894,7 @@ func (m *deviceLoopManager) Start(parent context.Context, dev detect.Device) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_ = enqueueDeviceSync(m.worker, dev, m.deps, m.state, "auto_poll", "")
+				_ = enqueueDeviceSync(m.worker, dev, m.deps, m.state, "auto_poll", syncengine.ScanOptions{})
 			}
 		}
 	}()

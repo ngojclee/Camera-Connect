@@ -37,6 +37,9 @@ type Deps struct {
 	// destRel is the final relative path inside the profile base path;
 	// stagedPath is where the verified copy currently lives.
 	PendingUpload func(profile *config.Profile, destRel, stagedPath string)
+	// Progress is called after each file decision (copied or skipped) —
+	// current counts files processed so far, total is the media count.
+	Progress func(current, total int, fileName string)
 }
 
 func (d *Deps) logf(format string, args ...any) {
@@ -56,15 +59,27 @@ type MediaSource interface {
 	SupportsDelete() bool
 }
 
+// ScanOptions carries per-job overrides for a sync pass.
+type ScanOptions struct {
+	ProfileID string // "" = shared active profile (manual scans may override)
+	Mode      string // "" = shared General.SyncMode; "copy" | "move"
+}
+
 // SyncDevice runs one full pass over a detected device.
 func SyncDevice(ctx context.Context, dev detect.Device, deps *Deps) (*Result, error) {
-	return SyncDeviceProfile(ctx, dev, deps, "")
+	return SyncDeviceOpts(ctx, dev, deps, ScanOptions{})
 }
 
 // SyncDeviceProfile runs one pass bound to a specific profile; an empty
-// profileID falls back to the shared active profile. Manual scans use this
-// to target a profile without changing the auto-sync active profile.
+// profileID falls back to the shared active profile.
 func SyncDeviceProfile(ctx context.Context, dev detect.Device, deps *Deps, profileID string) (*Result, error) {
+	return SyncDeviceOpts(ctx, dev, deps, ScanOptions{ProfileID: profileID})
+}
+
+// SyncDeviceOpts is the full entry point: profileID overrides the active
+// profile for this pass only (never mutates config), Mode overrides the
+// shared copy/move behavior for this pass only.
+func SyncDeviceOpts(ctx context.Context, dev detect.Device, deps *Deps, opts ScanOptions) (*Result, error) {
 	res := &Result{DeviceID: dev.ID, Camera: dev.Model}
 
 	var src MediaSource
@@ -88,10 +103,10 @@ func SyncDeviceProfile(ctx context.Context, dev detect.Device, deps *Deps, profi
 	}
 
 	var profile *config.Profile
-	if profileID != "" {
-		profile = deps.Config.ProfileByID(profileID)
+	if opts.ProfileID != "" {
+		profile = deps.Config.ProfileByID(opts.ProfileID)
 		if profile == nil {
-			return res, fmt.Errorf("profile not found: %s", profileID)
+			return res, fmt.Errorf("profile not found: %s", opts.ProfileID)
 		}
 	} else {
 		profile = deps.Config.ActiveProfile()
@@ -127,7 +142,11 @@ func SyncDeviceProfile(ctx context.Context, dev detect.Device, deps *Deps, profi
 
 	shared := deps.Config.Shared()
 	overwrite := shared.General.OverwriteExisting
-	moveMode := strings.EqualFold(shared.General.SyncMode, "move")
+	mode := shared.General.SyncMode
+	if opts.Mode != "" {
+		mode = opts.Mode
+	}
+	moveMode := strings.EqualFold(mode, "move")
 
 	// Route: backup-enabled profiles stage into <base>/_staging/<id>/ so
 	// rclone only ever sees the scoped batch; otherwise copy to final dest.
@@ -137,7 +156,11 @@ func SyncDeviceProfile(ctx context.Context, dev detect.Device, deps *Deps, profi
 	}
 
 	skippedByDate := map[string]int{}
-	for _, f := range valid {
+	total := len(valid)
+	for i, f := range valid {
+		if deps.Progress != nil {
+			deps.Progress(i, total, f.Name)
+		}
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}

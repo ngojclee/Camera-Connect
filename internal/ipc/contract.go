@@ -102,6 +102,9 @@ type CameraInfo struct {
 	DriveLetter string `json:"drive_letter,omitempty"`
 	Status      string `json:"status"` // "idle" | "syncing" | "error"
 	LastSync    string `json:"last_sync,omitempty"`
+	Progress    int    `json:"progress,omitempty"`     // files processed this pass
+	ProgressMax int    `json:"progress_max,omitempty"` // media files this pass
+	CurrentFile string `json:"current_file,omitempty"` // file being copied
 }
 
 // ProfileSnapshot is the resolved profile shape exposed to UI.

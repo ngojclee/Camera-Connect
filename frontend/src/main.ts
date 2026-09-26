@@ -2,7 +2,7 @@ import "./styles.css";
 import { execAction, isWailsRuntime, selectDirectory } from "./bridge";
 
 /* ---------- types ---------- */
-interface CameraInfo { id: string; model: string; mode: string; drive_letter?: string; status: string; last_sync?: string }
+interface CameraInfo { id: string; model: string; mode: string; drive_letter?: string; status: string; last_sync?: string; progress?: number; progress_max?: number; current_file?: string }
 interface ProfileSnap { id: string; name: string; base_path: string; photo_template: string; video_template: string; file_types?: string[]; backup_enabled: boolean; remote_name?: string; remote_path?: string; active: boolean }
 interface AppStatus {
   tray_color: string; status_text: string; service_running: boolean;
@@ -117,8 +117,9 @@ function panelDashboard(): string {
     ${cams.map(c => `
       <div class="cc-row cc-row-line">
         <span class="material-symbols-outlined">${c.mode === "mass_storage" ? "sd_card" : "usb"}</span>
-        <strong>${esc(c.model)}</strong>
-        <span class="cc-muted">${esc(c.mode)}${c.drive_letter ? " · " + esc(c.drive_letter) : ""}</span>
+        <div><strong>${esc(c.model)}</strong> <span class="cc-muted">${esc(c.mode)}${c.drive_letter ? " · " + esc(c.drive_letter) : ""}</span>
+          ${c.status === "syncing" && c.progress_max ? `<div class="cc-muted" style="font-size:11px">${c.progress}/${c.progress_max} — ${esc(c.current_file ?? "")}</div><div class="cc-progress" style="margin-top:4px;max-width:320px"><div style="width:${Math.round(100 * (c.progress ?? 0) / c.progress_max)}%"></div></div>` : ""}
+        </div>
         <span class="cc-spacer"></span>
         ${badge(c.status === "syncing" ? "blue" : c.status === "error" ? "red" : "green", c.status)}
       </div>`).join("")}
@@ -155,7 +156,9 @@ function panelImport(): string {
     ${cams.map(c => `
       <div class="cc-row cc-row-line">
         <span class="material-symbols-outlined">${c.mode === "mass_storage" ? "sd_card" : "usb"}</span>
-        <div><strong>${esc(c.model)}</strong><div class="cc-muted" style="font-size:11px">${esc(c.id)}</div></div>
+        <div><strong>${esc(c.model)}</strong><div class="cc-muted" style="font-size:11px">${esc(c.id)}</div>
+          ${c.status === "syncing" && c.progress_max ? `<div class="cc-muted" style="font-size:11px">${c.progress}/${c.progress_max} — ${esc(c.current_file ?? "")}</div><div class="cc-progress" style="margin-top:4px"><div style="width:${Math.round(100 * (c.progress ?? 0) / c.progress_max)}%"></div></div>` : ""}
+        </div>
         <span class="cc-spacer"></span>
         ${badge(c.status === "syncing" ? "blue" : "green", c.status)}
         <button class="cc-btn" data-scan="${esc(c.id)}"><span class="material-symbols-outlined">sync</span>Sync</button>

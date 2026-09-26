@@ -109,6 +109,24 @@ func (s *AppState) SetCameraStatus(id, status string) {
 	defer s.mu.Unlock()
 	if c, ok := s.cameras[id]; ok {
 		c.Status = status
+		if status != "syncing" {
+			c.Progress = 0
+			c.ProgressMax = 0
+			c.CurrentFile = ""
+		}
+		s.cameras[id] = c
+	}
+}
+
+// SetCameraProgress reports per-file progress for a syncing camera.
+// current=0 resets; callers pass i before processing each file.
+func (s *AppState) SetCameraProgress(id string, current, max int, file string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if c, ok := s.cameras[id]; ok {
+		c.Progress = current
+		c.ProgressMax = max
+		c.CurrentFile = file
 		s.cameras[id] = c
 	}
 }
