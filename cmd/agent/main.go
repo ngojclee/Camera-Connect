@@ -452,9 +452,6 @@ func dispatchCommand(reqCtx context.Context, req ipc.Request, d *agentDeps) ipc.
 		}
 		queued := 0
 		for _, dev := range devices {
-			if dev.Mode != detect.ModeMassStorage {
-				continue // MTP lands in Phase 3
-			}
 			if payload.DeviceID != "" && payload.DeviceID != dev.ID {
 				continue
 			}
@@ -465,7 +462,7 @@ func dispatchCommand(reqCtx context.Context, req ipc.Request, d *agentDeps) ipc.
 			queued++
 		}
 		if queued == 0 {
-			return ipc.Response{Success: false, Error: "no mass-storage camera matched (MTP support lands in Phase 3)", Code: ipc.CodeBadRequest}
+			return ipc.Response{Success: false, Error: "no camera matched the request", Code: ipc.CodeBadRequest}
 		}
 		return ipc.Response{Success: true, Data: map[string]string{"queued": fmt.Sprintf("%d", queued)}, Code: ipc.CodeOK}
 
@@ -718,9 +715,6 @@ func newDeviceLoopManager(worker *coordinator.SyncWorker, deps *syncengine.Deps,
 // Start begins the sync loop for a connected device.
 func (m *deviceLoopManager) Start(parent context.Context, dev detect.Device) {
 	m.Stop(dev.ID)
-	if dev.Mode != detect.ModeMassStorage {
-		return // MTP engines land in Phase 3
-	}
 	shared := m.cfgMgr.Shared()
 	if !shared.General.AutoSync {
 		return // manual mode: wait for scan_now

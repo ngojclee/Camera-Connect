@@ -34,6 +34,9 @@ func NewHandler(driveLetter, model string) *Handler {
 	return &Handler{DriveLetter: driveLetter, Model: model}
 }
 
+// SupportsDelete reports that mass-storage sources can delete files (move mode).
+func (h *Handler) SupportsDelete() bool { return true }
+
 // Connect verifies the drive exists and is readable.
 func (h *Handler) Connect() error {
 	info, err := os.Stat(h.DriveLetter)

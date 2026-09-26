@@ -43,13 +43,34 @@ func (d *Deps) logf(format string, args ...any) {
 	log.Printf(format, args...)
 }
 
-// SyncDevice runs one full pass: list → filter → skip-existing → copy →
-// optional move-mode delete. Honors ctx cancellation between files.
+// MediaSource abstracts a camera backend (mass storage today, MTP in Phase 3).
+type MediaSource interface {
+	Connect() error
+	ListMedia(ctx context.Context, scanRoot string) ([]massstorage.MediaFile, error)
+	CopyTo(ctx context.Context, f massstorage.MediaFile, destPath string, overwrite bool) (int64, bool, error)
+	Delete(f massstorage.MediaFile) error
+	SupportsDelete() bool
+}
+
+// SyncDevice runs one full pass over a detected device.
 func SyncDevice(ctx context.Context, dev detect.Device, deps *Deps) (*Result, error) {
-	if dev.Mode != detect.ModeMassStorage {
-		return nil, fmt.Errorf("mtp sync lands in Phase 3 (device %s)", dev.ID)
-	}
 	res := &Result{DeviceID: dev.ID, Camera: dev.Model}
+
+	var src MediaSource
+	scanRoot := "DCIM"
+	switch dev.Mode {
+	case detect.ModeMassStorage:
+		src = massstorage.NewHandler(dev.DriveLetter, dev.Model)
+	case detect.ModeMTP:
+		mtpSrc, err := openMTPSource(dev)
+		if err != nil {
+			return res, err
+		}
+		src = mtpSrc
+		scanRoot = "" // MTP walks storages itself
+	default:
+		return res, fmt.Errorf("unknown device mode %q", dev.Mode)
+	}
 
 	profile := deps.Config.ActiveProfile()
 	if profile == nil {
@@ -61,14 +82,13 @@ func SyncDevice(ctx context.Context, dev detect.Device, deps *Deps) (*Result, er
 		return res, fmt.Errorf("profile %q has no base_path on this machine", profile.ID)
 	}
 
-	h := massstorage.NewHandler(dev.DriveLetter, dev.Model)
-	if err := h.Connect(); err != nil {
+	if err := src.Connect(); err != nil {
 		return res, err
 	}
 
-	files, err := h.ListMedia(ctx, "DCIM")
+	files, err := src.ListMedia(ctx, scanRoot)
 	if err != nil {
-		return res, fmt.Errorf("list media on %s: %w", dev.DriveLetter, err)
+		return res, fmt.Errorf("list media on %s: %w", dev.ID, err)
 	}
 
 	valid := make([]massstorage.MediaFile, 0, len(files))
@@ -106,7 +126,7 @@ func SyncDevice(ctx context.Context, dev detect.Device, deps *Deps) (*Result, er
 			continue
 		}
 
-		written, already, err := h.CopyTo(ctx, f, dest, overwrite)
+		written, already, err := src.CopyTo(ctx, f, dest, overwrite)
 		if err != nil {
 			res.Failed++
 			deps.logf("[ERROR] copy failed %s: %v", f.Name, err)
@@ -127,12 +147,14 @@ func SyncDevice(ctx context.Context, dev detect.Device, deps *Deps) (*Result, er
 		}
 		deps.logf("[INFO] Synced %s (%d bytes) → %s", f.Name, written, dest)
 
-		if moveMode {
-			if err := h.Delete(f); err != nil {
+		if moveMode && src.SupportsDelete() {
+			if err := src.Delete(f); err != nil {
 				deps.logf("[WARN] move mode: delete failed %s: %v", f.Name, err)
 			} else {
 				res.DeletedSrc++
 			}
+		} else if moveMode && !src.SupportsDelete() {
+			deps.logf("[WARN] move mode requested but %s cannot delete (copy only)", dev.Mode)
 		}
 	}
 

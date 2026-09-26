@@ -34,12 +34,15 @@
 - [x] Tests: template render, fake-card copy/skip/move incl. sidecar cleanup — `go test ./...` all pass
 - [ ] Hardware gate pending owner: real SD card insert → dated folders + skip + move mode (needs physical card)
 
-## Phase 3 — MTP (risk phase)
-- [ ] Spike: `go-ole` IDispatch → `Shell.Application`/`Namespace`/`CopyHere` PoC (≤1 day) — decide a/b/c per plan §6
-- [ ] Implement MTP list/download with post-copy settle check (size-stable polling — fixes async race)
-- [ ] Brand-agnostic roots: enumerate storages → locate `DCIM` recursively; per-brand override config
-- [ ] Move-mode policy per owner decision (recommend mass-storage-only)
-- [ ] Gate: ILCE-7RM3 + NEX-5R + ZV-E10 list/download over MTP; truncated-upload race impossible
+## Phase 3 — MTP ✅ CODE COMPLETE (2026-09-26, hardware gate pending)
+- [x] `internal/camera/mtp`: `go-ole` Shell.Application — all COM on one OS-locked worker goroutine per Source (apartment-safe); `NameSpace(17)` This PC enumeration, device match by PNP-device-id path or model name
+- [x] `ListMedia` recursive walk collecting files under DCIM/PRIVATE paths (brand-agnostic, skips THMBNL/THUMBNAIL)
+- [x] `CopyTo` → `Folder.CopyHere(item, 9748)` + `waitSettled` size-stable check (3×500ms, 10min cap) — truncated-upload race impossible; post-copy size verify
+- [x] `SupportsDelete()=false` for MTP — move mode copy-only on MTP (safer than Python's unreliable delete), mass storage keeps delete
+- [x] `syncengine.MediaSource` interface — massstorage + MTP unified; engine syncs either mode
+- [x] Agent: MTP devices get auto-sync loops + manual scan-now support
+- [x] `go build/test/vet` all clean; agent runs WMI portable-device scan without errors
+- [ ] Hardware gate pending owner: ILCE-7RM3 + NEX-5R + ZV-E10 list/download over MTP (needs physical camera)
 
 ## Phase 4 — Upload pipeline v2
 - [ ] Staging dir `<base_path>/_staging/<profile>/` (per owner decision) + same-volume finalize move
