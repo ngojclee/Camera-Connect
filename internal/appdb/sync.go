@@ -2,6 +2,8 @@ package appdb
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -242,9 +244,41 @@ func (s *Service) RcloneConfPath() string {
 	return filepath.Join(s.secretsDir, "rclone.conf")
 }
 
+// derivedPassphrase deterministically derives a vault passphrase from the
+// logged-in user id — same on every machine, so push/pull work without the
+// user typing anything. Honest trade-off: convenient but not secret — anyone
+// with the ciphertext, the user_id (stored server-side) and this source can
+// re-derive it. For real secrecy use a manual passphrase instead.
+func (s *Service) derivedPassphrase() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.session == nil || s.session.UserID == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("camera-connect-vault-v1:" + s.session.UserID))
+	return hex.EncodeToString(sum[:])
+}
+
+// resolvePassphrase returns the manual passphrase when given, else the
+// account-derived one. Empty result means no session is logged in.
+func (s *Service) resolvePassphrase(passphrase string) (string, error) {
+	if passphrase != "" {
+		return passphrase, nil
+	}
+	if p := s.derivedPassphrase(); p != "" {
+		return p, nil
+	}
+	return "", ErrNotAuthenticated
+}
+
 // PushRcloneConf seals the local rclone.conf with passphrase and upserts it
 // to AppDB user scope (key rclone_bundle). Server only sees ciphertext.
+// Empty passphrase auto-derives one from the logged-in account.
 func (s *Service) PushRcloneConf(ctx context.Context, passphrase string) error {
+	passphrase, err := s.resolvePassphrase(passphrase)
+	if err != nil {
+		return err
+	}
 	confPath := s.RcloneConfPath()
 	data, err := os.ReadFile(confPath)
 	if err != nil {
@@ -272,8 +306,13 @@ func (s *Service) PushRcloneConf(ctx context.Context, passphrase string) error {
 }
 
 // PullRcloneConf fetches the sealed bundle, unseals with passphrase, and
-// writes the local rclone.conf (0600). Returns ErrAuth on wrong passphrase.
+// writes the local rclone.conf (0600). Empty passphrase auto-derives one
+// from the logged-in account. Returns ErrAuth on wrong passphrase.
 func (s *Service) PullRcloneConf(ctx context.Context, passphrase string) error {
+	passphrase, err := s.resolvePassphrase(passphrase)
+	if err != nil {
+		return err
+	}
 	setting, err := s.GetSetting(ctx, "user", KeyRcloneBundle)
 	if err != nil {
 		return err

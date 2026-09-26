@@ -757,22 +757,23 @@ func dispatchCommand(reqCtx context.Context, req ipc.Request, d *agentDeps) ipc.
 
 	case ipc.CmdVaultPush:
 		payload, err := decodePayload[ipc.VaultPayload](req.Payload)
-		if err != nil || payload.Passphrase == "" {
-			return ipc.Response{Success: false, Error: "passphrase is required", Code: ipc.CodeBadRequest}
+		if err != nil {
+			return ipc.Response{Success: false, Error: "invalid vault payload", Code: ipc.CodeBadRequest}
 		}
 		if d.appdbSvc == nil {
 			return ipc.Response{Success: false, Error: "appdb unavailable", Code: ipc.CodeInternalError}
 		}
+		// Empty passphrase → account-derived key (no typing needed).
 		if err := d.appdbSvc.PushRcloneConf(reqCtx, payload.Passphrase); err != nil {
 			return ipc.Response{Success: false, Error: err.Error(), Code: ipc.CodeInternalError}
 		}
-		log.Printf("[INFO] rclone.conf sealed and pushed to AppDB")
+		log.Printf("[INFO] rclone.conf sealed and pushed to AppDB (key=%s)", keySource(payload.Passphrase))
 		return ipc.Response{Success: true, Data: map[string]string{"status": "pushed"}, Code: ipc.CodeOK}
 
 	case ipc.CmdVaultPull:
 		payload, err := decodePayload[ipc.VaultPayload](req.Payload)
-		if err != nil || payload.Passphrase == "" {
-			return ipc.Response{Success: false, Error: "passphrase is required", Code: ipc.CodeBadRequest}
+		if err != nil {
+			return ipc.Response{Success: false, Error: "invalid vault payload", Code: ipc.CodeBadRequest}
 		}
 		if d.appdbSvc == nil {
 			return ipc.Response{Success: false, Error: "appdb unavailable", Code: ipc.CodeInternalError}
@@ -780,7 +781,7 @@ func dispatchCommand(reqCtx context.Context, req ipc.Request, d *agentDeps) ipc.
 		if err := d.appdbSvc.PullRcloneConf(reqCtx, payload.Passphrase); err != nil {
 			return ipc.Response{Success: false, Error: err.Error(), Code: ipc.CodeInternalError}
 		}
-		log.Printf("[INFO] rclone.conf pulled and unsealed → %s", d.appdbSvc.RcloneConfPath())
+		log.Printf("[INFO] rclone.conf pulled and unsealed → %s (key=%s)", d.appdbSvc.RcloneConfPath(), keySource(payload.Passphrase))
 		return ipc.Response{Success: true, Data: map[string]string{"status": "pulled"}, Code: ipc.CodeOK}
 
 	case ipc.CmdShutdownAgent:
@@ -1497,4 +1498,12 @@ func appdbPushSettings(ctx context.Context, svc *appdb.Service, cfgMgr *config.M
 	appdbPushOne(ctx, svc, cfgMgr, db, "user", appdb.KeySharedConfig)
 	appdbPushOne(ctx, svc, cfgMgr, db, "user", appdb.KeyProfileDefs)
 	appdbPushOne(ctx, svc, cfgMgr, db, "device", appdb.KeyDevicePaths)
+}
+
+// keySource reports whether a vault op used a manual or account-derived key.
+func keySource(passphrase string) string {
+	if passphrase == "" {
+		return "account-derived"
+	}
+	return "manual"
 }

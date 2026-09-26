@@ -254,9 +254,9 @@ function panelSync(): string {
   ${loggedIn ? `
   <div class="cc-card">
     <h3>Credential Vault</h3>
-    <div class="cc-empty">rclone.conf is sealed with your passphrase (AES-256-GCM) before it leaves this machine — the server only ever stores ciphertext.</div>
+    <div class="cc-empty">rclone.conf is sealed (AES-256-GCM) before it leaves this machine — the server only stores ciphertext. Leave the field empty to use a key derived from your account — same on every machine, nothing to type. Set a custom passphrase for stronger protection.</div>
     <div class="cc-form" style="margin-top:10px;max-width:340px">
-      <label>Vault passphrase</label><input class="cc-input" id="vault-pass" type="password"/>
+      <label>Vault passphrase <span class="cc-muted">(optional — account key if empty)</span></label><input class="cc-input" id="vault-pass" type="password"/>
       <div class="cc-row" style="margin-top:8px">
         <button class="cc-btn" id="btn-vpush"><span class="material-symbols-outlined">upload</span>Push rclone.conf</button>
         <button class="cc-btn" id="btn-vpull"><span class="material-symbols-outlined">download</span>Pull rclone.conf</button>
