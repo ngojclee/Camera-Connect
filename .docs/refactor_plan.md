@@ -93,7 +93,7 @@ Resolution order: profile field → `config.local.yaml` machine override → `co
 profiles:
   - id: luxeclaw
     name: LuxeClaw Products
-    base_path: F:/2.Studio/Products_LuxeClaw      # machine-overridable
+    base_path: D:/Photos/CameraConnect      # machine-overridable
     photo_template: '{camera}/{yyyy}/{yyyy}-{mm}-{dd}'
     video_template: Video
     file_types: [ARW, JPG, JPEG, HEIF, MP4, MTS]

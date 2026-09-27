@@ -12,7 +12,9 @@ html, body {
   height: 100%;
   margin: 0;
   font-family: var(--font-body);
-  background: var(--bg-primary, #191919);
+  /* Transparent — the frameless window is translucent; .cc-shell paints the
+     real surface so its rounded corners reveal the OS backdrop (Mica). */
+  background: transparent;
   color: var(--text-primary, #e3e3e3);
   -webkit-font-smoothing: antialiased;
   user-select: none;
@@ -34,6 +36,17 @@ html, body {
   display: flex;
   flex-direction: column;
   height: 100%;
+  background: var(--bg-primary, #191919);
+  /* Rounded OS-style window: corners reveal the translucent backdrop. */
+  border-radius: 10px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  overflow: hidden;
+}
+
+/* Maximized (or snapped) — square corners, no floating border. */
+body.win-max .cc-shell {
+  border-radius: 0;
+  border-color: transparent;
 }
 
 .cc-titlebar {

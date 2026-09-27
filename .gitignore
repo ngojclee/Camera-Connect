@@ -84,3 +84,4 @@ frontend/wailsjs/
 # OS/editor
 .vscode/
 .idea/
+rsrc_windows_amd64.syso

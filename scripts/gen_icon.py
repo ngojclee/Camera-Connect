@@ -107,6 +107,19 @@ def draw_icon(size_s):
     return im
 
 
+def with_status_dot(base, color):
+    """Small status dot at bottom-right for tray variants."""
+    im = base.copy()
+    d = ImageDraw.Draw(im)
+    s = im.width
+    r = int(s * 0.13)
+    x1, y1 = int(s * 0.98), int(s * 0.98)
+    # white halo for contrast on taskbar backgrounds
+    d.ellipse([x1 - r - int(s*0.025), y1 - r - int(s*0.025), x1 + int(s*0.02), y1 + int(s*0.02)], fill=WHITE)
+    d.ellipse([x1 - r, y1 - r, x1, y1], fill=color)
+    return im
+
+
 def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     assets = os.path.join(root, "assets")
@@ -122,7 +135,19 @@ def main():
     pub = os.path.join(root, "frontend", "public")
     os.makedirs(pub, exist_ok=True)
     icon1024.resize((256, 256), Image.LANCZOS).save(os.path.join(pub, "icon.png"))
-    print("icons written:", os.listdir(assets), os.listdir(pub))
+
+    # Tray status variants — dot overlay communicates state at a glance.
+    tray_dir = os.path.join(root, "cmd", "agent")
+    for name, color in [
+        ("tray_blue", (59, 130, 246)),
+        ("tray_green", (34, 197, 94)),
+        ("tray_orange", (249, 115, 22)),
+        ("tray_red", (239, 68, 68)),
+        ("tray_gray", (107, 114, 128)),
+    ]:
+        v = with_status_dot(big, color).resize((S, S), Image.LANCZOS)
+        v.save(os.path.join(tray_dir, f"{name}.ico"), sizes=[(z, z) for z in sizes])
+    print("icons written:", os.listdir(assets), os.listdir(pub), os.listdir(tray_dir))
 
 
 if __name__ == "__main__":

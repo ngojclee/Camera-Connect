@@ -9,7 +9,7 @@ cameras:
   protocol: mtp
   usb_pid: 0C00
 destination:
-  base_path: F:/2.Studio/Products_LuxeClaw
+  base_path: D:/Photos/CameraConnect
   photo_template: '{yyyy}/{yyyy}-{mm}-{dd}'
   video_template: Video
 file_types:

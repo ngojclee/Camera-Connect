@@ -118,11 +118,20 @@ try {
             if (Test-Path -LiteralPath $icoSrc) {
                 Copy-Item -LiteralPath $icoSrc -Destination (Join-Path $Root "build\windows\icon.ico") -Force
             }
-            # Embed icon+manifest via rsrc so manual `go build` also gets the icon
-            # (wails build does this internally; our fallback path doesn't).
+            # wails build generates and cleans up its own rsrc_windows_amd64.syso
+            # at the project root — a stale one left in place causes the linker
+            # error "too many .rsrc sections". Remove it before invoking wails.
+            $staleSyso = Join-Path $Root "rsrc_windows_amd64.syso"
+            if (Test-Path -LiteralPath $staleSyso) {
+                Remove-Item -LiteralPath $staleSyso -Force
+            }
+            # Embed icon+manifest via rsrc only for the manual `go build`
+            # fallback path (wails build embeds resources internally).
             $manifestSrc = Join-Path $Root "assets\app.manifest"
-            if ((Test-Path -LiteralPath $icoSrc) -and (Test-Path -LiteralPath $manifestSrc)) {
-                & go run github.com/akavel/rsrc@v0.10.2 -ico $icoSrc -manifest $manifestSrc -arch amd64
+            $genRootSyso = {
+                if ((Test-Path -LiteralPath $icoSrc) -and (Test-Path -LiteralPath $manifestSrc)) {
+                    & go run github.com/akavel/rsrc@v0.10.2 -ico $icoSrc -manifest $manifestSrc -arch amd64
+                }
             }
             if ($wailsCmd) {
                 $wailsArgs = @(
@@ -162,6 +171,7 @@ try {
 
             # Fallback: wails CLI not found — direct go build at project root with wails tags
             Write-Warning "[build] wails CLI not found in PATH. Attempting direct go build -tags wails..."
+            & $genRootSyso
             $wailsLdflags = "$Ldflags -H windowsgui"
             & go build -trimpath -tags "wails,desktop,production" -ldflags $wailsLdflags -o $OutPath .
             if ($LASTEXITCODE -ne 0) {

@@ -1,5 +1,6 @@
 import "./styles.css";
 import { execAction, isWailsRuntime, selectDirectory } from "./bridge";
+import { WindowIsMaximised } from "../wailsjs/runtime/runtime";
 
 /* ---------- types ---------- */
 interface CameraInfo { id: string; model: string; mode: string; drive_letter?: string; status: string; last_sync?: string; progress?: number; progress_max?: number; current_file?: string }
@@ -427,7 +428,11 @@ function render(): void {
 function wire(): void {
   const go = window.go?.main?.WailsApp;
   document.getElementById("btn-min")?.addEventListener("click", () => go?.MinimiseWindow());
-  document.getElementById("btn-max")?.addEventListener("click", () => go?.ToggleMaximise());
+  document.getElementById("btn-max")?.addEventListener("click", async () => {
+    go?.ToggleMaximise();
+    // Reflect square corners when maximised (rounded look only floats).
+    setTimeout(syncMaxClass, 150);
+  });
   document.getElementById("btn-close")?.addEventListener("click", () => go?.HideToTray());
   document.querySelectorAll("[data-nav]").forEach(el =>
     el.addEventListener("click", () => { state.panel = (el as HTMLElement).dataset.nav as PanelID; lazyLoad(); render(); }));
@@ -631,3 +636,13 @@ async function refresh(): Promise<void> {
 render();
 refresh();
 setInterval(refresh, 3000);
+
+// Keep rounded corners only while the window floats — Windows expects square
+// chrome when maximised or snapped.
+async function syncMaxClass(): Promise<void> {
+  try {
+    document.body.classList.toggle("win-max", await WindowIsMaximised());
+  } catch { /* browser preview — no wails runtime */ }
+}
+window.addEventListener("resize", () => { void syncMaxClass(); });
+void syncMaxClass();
