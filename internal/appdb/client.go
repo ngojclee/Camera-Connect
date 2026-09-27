@@ -250,8 +250,17 @@ func (c *Client) Tenants(ctx context.Context, s *Session) ([]struct {
 	return rows, err
 }
 
-// Heartbeat pings the installation (also detects remote-side changes).
-func (c *Client) Heartbeat(ctx context.Context, s *Session, installationID string, expectedRev int, version string) error {
+// HeartbeatResult carries the installation revision back to the caller.
+type HeartbeatResult struct {
+	Revision int
+	Conflict bool
+}
+
+// Heartbeat pings the installation. The server bumps the row's revision on
+// every successful heartbeat, so callers must remember current_revision and
+// pass it as expectedRev next time — a Conflict result reports the server's
+// actual revision so the caller can adopt it and retry.
+func (c *Client) Heartbeat(ctx context.Context, s *Session, installationID string, expectedRev int, version string) (*HeartbeatResult, error) {
 	var rows []map[string]any
 	err := c.rpc(ctx, s, "extension_heartbeat_installation", map[string]any{
 		"p_installation_id":   installationID,
@@ -259,14 +268,18 @@ func (c *Client) Heartbeat(ctx context.Context, s *Session, installationID strin
 		"p_installed_version": version,
 	}, &rows)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	res := &HeartbeatResult{}
 	if len(rows) > 0 {
 		if conflict, _ := rows[0]["conflict"].(bool); conflict {
-			return fmt.Errorf("appdb: installation changed on another device (revision conflict)")
+			res.Conflict = true
+		}
+		if rev, ok := rows[0]["current_revision"].(float64); ok {
+			res.Revision = int(rev)
 		}
 	}
-	return nil
+	return res, nil
 }
 
 // ---------- scoped settings ----------

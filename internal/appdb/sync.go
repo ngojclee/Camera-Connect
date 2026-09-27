@@ -187,13 +187,40 @@ func (s *Service) requireContext() (*Session, *Context, error) {
 }
 
 // Heartbeat pings the server-side installation row — lets AppDB know this
-// installation is alive and surfaces its app version.
+// installation is alive and surfaces its app version. The server bumps the
+// installation revision on every heartbeat; we track it in ctx.Revision and
+// self-heal once on conflict by adopting the server's revision.
 func (s *Service) Heartbeat(ctx context.Context) error {
 	sess, c, err := s.requireContext()
 	if err != nil {
 		return err
 	}
-	return s.client.Heartbeat(ctx, sess, c.InstallationID, 0, s.version)
+	res, err := s.client.Heartbeat(ctx, sess, c.InstallationID, c.Revision, s.version)
+	if err != nil {
+		return err
+	}
+	if res.Conflict {
+		// Stale expected revision (e.g. first tick after restart — the
+		// persisted revision predates server-side bumps). Adopt the server's
+		// current revision and retry once instead of warning forever.
+		s.mu.Lock()
+		s.ctx.Revision = res.Revision
+		s.mu.Unlock()
+		res, err = s.client.Heartbeat(ctx, sess, c.InstallationID, res.Revision, s.version)
+		if err != nil {
+			return err
+		}
+		if res.Conflict {
+			return fmt.Errorf("appdb: installation changed on another device (revision conflict)")
+		}
+	}
+	if res.Revision != 0 && res.Revision != c.Revision {
+		s.mu.Lock()
+		s.ctx.Revision = res.Revision
+		s.mu.Unlock()
+		_ = s.persist()
+	}
+	return nil
 }
 
 // PushSettingValue upserts one scoped key with read-modify-write revision
