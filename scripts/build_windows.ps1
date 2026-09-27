@@ -118,6 +118,12 @@ try {
             if (Test-Path -LiteralPath $icoSrc) {
                 Copy-Item -LiteralPath $icoSrc -Destination (Join-Path $Root "build\windows\icon.ico") -Force
             }
+            # Embed icon+manifest via rsrc so manual `go build` also gets the icon
+            # (wails build does this internally; our fallback path doesn't).
+            $manifestSrc = Join-Path $Root "assets\app.manifest"
+            if ((Test-Path -LiteralPath $icoSrc) -and (Test-Path -LiteralPath $manifestSrc)) {
+                & go run github.com/akavel/rsrc@v0.10.2 -ico $icoSrc -manifest $manifestSrc -arch amd64
+            }
             if ($wailsCmd) {
                 $wailsArgs = @(
                     "build",
