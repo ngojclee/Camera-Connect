@@ -388,7 +388,7 @@ function render(): void {
   <div class="cc-shell">
     <div class="cc-titlebar">
       <div class="cc-row" style="gap:8px">
-        <span class="material-symbols-outlined" style="color:var(--accent,#2563eb)">photo_camera</span>
+        <img src="/icon.png" alt="" style="width:22px;height:22px;border-radius:5px"/>
         <strong style="font-family:var(--font-display)">Camera Connect</strong>
         ${badge(s?.tray_color ?? (online ? "green" : "red"), s?.status_text ?? (online ? "Ready" : "Agent offline"))}
         ${s?.update_available ? badge("blue", `v${esc(s.update_available)}`) : ""}
