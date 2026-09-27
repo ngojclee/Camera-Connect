@@ -18,6 +18,7 @@ interface WailsBindings {
   ExitApplication(): Promise<ActionEnvelope>;
   HideToTray(): void;
   MinimiseWindow(): void;
+  ToggleMaximise(): void;
   ShowWindow(): void;
 }
 

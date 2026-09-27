@@ -395,6 +395,7 @@ function render(): void {
       </div>
       <div class="btns">
         <button class="cc-btn" id="btn-min"><span class="material-symbols-outlined">remove</span></button>
+        <button class="cc-btn" id="btn-max"><span class="material-symbols-outlined">crop_square</span></button>
         <button class="cc-btn" id="btn-close"><span class="material-symbols-outlined">close</span></button>
       </div>
     </div>
@@ -426,6 +427,7 @@ function render(): void {
 function wire(): void {
   const go = window.go?.main?.WailsApp;
   document.getElementById("btn-min")?.addEventListener("click", () => go?.MinimiseWindow());
+  document.getElementById("btn-max")?.addEventListener("click", () => go?.ToggleMaximise());
   document.getElementById("btn-close")?.addEventListener("click", () => go?.HideToTray());
   document.querySelectorAll("[data-nav]").forEach(el =>
     el.addEventListener("click", () => { state.panel = (el as HTMLElement).dataset.nav as PanelID; lazyLoad(); render(); }));

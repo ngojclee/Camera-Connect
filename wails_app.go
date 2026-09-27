@@ -60,6 +60,18 @@ func (a *WailsApp) MinimiseWindow() {
 	}
 }
 
+// ToggleMaximise switches between maximised and normal window state.
+func (a *WailsApp) ToggleMaximise() {
+	if a.ctx == nil {
+		return
+	}
+	if wailsruntime.WindowIsMaximised(a.ctx) {
+		wailsruntime.WindowUnmaximise(a.ctx)
+	} else {
+		wailsruntime.WindowMaximise(a.ctx)
+	}
+}
+
 // ShowWindow brings a hidden window back.
 func (a *WailsApp) ShowWindow() {
 	if a.ctx != nil {

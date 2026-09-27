@@ -25,6 +25,7 @@ func launchWailsRuntime(pipeName string) error {
 	app := NewWailsApp(pipeName)
 	appOptions := &options.App{
 		Title:     "Camera Connect",
+		Frameless: true, // custom .cc-titlebar provides min/max/close
 		MinWidth:  980,
 		MinHeight: 700,
 		Width:     1240,
