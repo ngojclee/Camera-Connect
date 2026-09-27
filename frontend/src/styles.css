@@ -37,7 +37,7 @@ html, body {
 }
 
 .cc-titlebar {
-  -webkit-app-region: drag;
+  --wails-draggable: drag;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -47,7 +47,7 @@ html, body {
 }
 
 .cc-titlebar .btns {
-  -webkit-app-region: no-drag;
+  --wails-draggable: no-drag;
   display: flex;
   gap: 6px;
 }
@@ -79,7 +79,7 @@ html, body {
 }
 
 .cc-btn {
-  -webkit-app-region: no-drag;
+  --wails-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -155,7 +155,7 @@ html, body {
   padding: 12px 8px; display: flex; flex-direction: column; gap: 2px;
 }
 .cc-nav-item {
-  -webkit-app-region: no-drag;
+  --wails-draggable: no-drag;
   display: flex; align-items: center; gap: 10px;
   padding: 9px 12px; border: none; border-radius: 8px;
   background: transparent; color: var(--text-secondary, #a0a0a0);
