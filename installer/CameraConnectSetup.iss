@@ -34,6 +34,7 @@ DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\{#UIBinaryName}
 OutputDir={#OutputDir}
 OutputBaseFilename=CameraConnectSetup-v{#AppVersion}-windows-amd64
+SetupIconFile=..\assets\icon.ico
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible

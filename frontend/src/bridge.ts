@@ -24,6 +24,7 @@ interface WailsBindings {
 declare global {
   interface Window {
     go?: { main?: { WailsApp?: WailsBindings } };
+    runtime?: { BrowserOpenURL?: (url: string) => void };
   }
 }
 

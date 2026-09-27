@@ -109,6 +109,15 @@ try {
         $previousCgo = $env:CGO_ENABLED
         $env:CGO_ENABLED = "1"
         try {
+            # Stage brand icon so wails/rsrc bakes it into the exe + installer.
+            $iconSrc = Join-Path $Root "assets\icon.png"
+            $icoSrc = Join-Path $Root "assets\icon.ico"
+            if (Test-Path -LiteralPath $iconSrc) {
+                Copy-Item -LiteralPath $iconSrc -Destination (Join-Path $Root "build\appicon.png") -Force
+            }
+            if (Test-Path -LiteralPath $icoSrc) {
+                Copy-Item -LiteralPath $icoSrc -Destination (Join-Path $Root "build\windows\icon.ico") -Force
+            }
             if ($wailsCmd) {
                 $wailsArgs = @(
                     "build",

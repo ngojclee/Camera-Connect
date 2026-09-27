@@ -349,6 +349,9 @@ function panelAbout(): string {
     <h3>Camera Connect</h3>
     <div class="cc-muted">Version ${esc(s?.version ?? "dev")} · Machine ${esc(s?.machine_name ?? "")}</div>
     <div class="cc-muted" style="font-size:12px;margin-top:4px">PolyForm Noncommercial — free for personal & hobby use.</div>
+    <div class="cc-row" style="margin-top:8px">
+      <button class="cc-btn" id="btn-github"><span class="material-symbols-outlined">open_in_new</span>GitHub — ngojclee/camera-connect</button>
+    </div>
   </div>
   <div class="cc-card">
     <h3>Updates</h3>
@@ -562,6 +565,11 @@ function wire(): void {
   document.getElementById("btn-dl-update")?.addEventListener("click", async () => {
     const r = await execAction("download-update", "{}");
     toast(r.ok ? "Downloading update…" : (r.error ?? "download failed"));
+  });
+  document.getElementById("btn-github")?.addEventListener("click", () => {
+    const url = "https://github.com/ngojclee/camera-connect";
+    if (window.runtime?.BrowserOpenURL) window.runtime.BrowserOpenURL(url);
+    else window.open(url, "_blank");
   });
 }
 

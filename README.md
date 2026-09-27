@@ -1,4 +1,4 @@
-# Camera Connect
+# <img src="assets/icon.png" width="48" align="top"/> Camera Connect
 
 Tự động đồng bộ ảnh/video từ máy ảnh về PC — hỗ trợ cả **USB Mass Storage** (thẻ nhớ) và **MTP** (camera qua USB). Background agent + desktop UI, cloud backup qua rclone, đồng bộ cấu hình giữa nhiều máy.
 
