@@ -217,6 +217,37 @@ body.win-max .cc-shell {
 .cc-toast .material-symbols-outlined { font-size: 18px; color: var(--accent, #2563eb); }
 .cc-toast-err { border-color: #ef4444; }
 .cc-toast-err .material-symbols-outlined { color: #ef4444; }
+
+/* Release notes — own bordered box, scrollable, never shifts buttons. */
+.cc-changelog {
+  margin-top: 12px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.10));
+  border-radius: 8px;
+  background: var(--bg-input, #f4f4f5);
+  overflow: hidden;
+}
+.cc-changelog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary, #6b6b6b);
+  border-bottom: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+}
+.cc-link { color: var(--accent, #2563eb); text-decoration: none; font-weight: 500; }
+.cc-link:hover { text-decoration: underline; }
+.cc-changelog-body {
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary, #525252);
+  white-space: pre-wrap;
+  max-height: 140px;
+  overflow-y: auto;
+}
 @keyframes cctoast-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }

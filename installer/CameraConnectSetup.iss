@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "3.0.0.5"
+  #define AppVersion "3.0.0.6"
 #endif
 
 #ifndef SourceBinDir

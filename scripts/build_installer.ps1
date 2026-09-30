@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "3.0.0.5",
+    [string]$Version = "3.0.0.6",
     [string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
     [string]$SourceBinDir = "build/bin",
     [string]$OutputDir = "build/installer",

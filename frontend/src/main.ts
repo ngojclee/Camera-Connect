@@ -365,12 +365,19 @@ function panelAbout(): string {
   </div>
   <div class="cc-card">
     <h3>Updates</h3>
-    ${u ? (u.has_update ? badge("blue", `v${esc(u.latest_version)} available`) : badge("green", "Up to date")) : badge("green", "Not checked")}
-    ${u?.release_notes ? `<div class="cc-muted" style="margin-top:6px;white-space:pre-wrap">${esc(u.release_notes.slice(0, 400))}</div>` : ""}
-    <div class="cc-row" style="margin-top:10px">
+    <div class="cc-row">
+      ${u ? (u.has_update ? badge("blue", `v${esc(u.latest_version)} available`) : badge("green", "Up to date")) : badge("green", "Not checked")}
       <button class="cc-btn" id="btn-check-update"><span class="material-symbols-outlined">refresh</span>Check for updates</button>
       ${u?.has_update ? `<button class="cc-btn primary" id="btn-dl-update"><span class="material-symbols-outlined">download</span>Download v${esc(u.latest_version)}</button>` : ""}
     </div>
+    ${u?.release_notes ? `
+    <div class="cc-changelog">
+      <div class="cc-changelog-head">
+        <span>What's new in v${esc(u.latest_version)}</span>
+        ${u.release_url ? `<a class="cc-link" id="lnk-release" href="#">Full notes</a>` : ""}
+      </div>
+      <div class="cc-changelog-body">${esc(u.release_notes)}</div>
+    </div>` : ""}
   </div>`;
 }
 
@@ -585,6 +592,13 @@ function wire(): void {
   });
   document.getElementById("btn-github")?.addEventListener("click", () => {
     const url = "https://github.com/ngojclee/camera-connect";
+    if (window.runtime?.BrowserOpenURL) window.runtime.BrowserOpenURL(url);
+    else window.open(url, "_blank");
+  });
+  document.getElementById("lnk-release")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    const url = state.update?.release_url;
+    if (!url) return;
     if (window.runtime?.BrowserOpenURL) window.runtime.BrowserOpenURL(url);
     else window.open(url, "_blank");
   });
