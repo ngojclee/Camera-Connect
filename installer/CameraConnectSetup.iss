@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "3.0.0.6"
+  #define AppVersion "3.0.0.7"
 #endif
 
 #ifndef SourceBinDir
@@ -43,9 +43,9 @@ PrivilegesRequired=admin
 WizardStyle=modern
 UsePreviousAppDir=yes
 UsePreviousTasks=yes
-CloseApplications=yes
+CloseApplications=force
 RestartApplications=no
-AppMutex=CameraConnectAgent_Mutex
+AppMutex=CameraConnectAgent_Mutex,CameraConnectUI_Mutex
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -66,6 +66,7 @@ Name: "{autodesktop}\Camera Connect"; Filename: "{app}\{#UIBinaryName}"; Working
 Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "CameraConnect"; ValueData: """{app}\CameraConnectAgent.exe"" --minimized"; Flags: uninsdeletevalue
 
 [Run]
+Filename: "{app}\CameraConnectAgent.exe"; Parameters: "--minimized"; Flags: nowait postinstall skipifsilent runasoriginaluser
 Filename: "{app}\{#UIBinaryName}"; Description: "Launch Camera Connect"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [Code]
