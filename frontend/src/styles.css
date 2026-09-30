@@ -194,7 +194,33 @@ body.win-max .cc-shell {
 .cc-progress > div { height: 100%; background: var(--accent, #2563eb); transition: width 300ms; }
 
 .cc-alert { border-color: #ef4444; }
-.cc-notice { border-color: var(--accent, #2563eb); padding: 10px 14px; font-size: 13px; }
+
+/* Corner toast — floats above content, never shifts the layout. */
+.cc-toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--bg-card, #232323);
+  border: 1px solid var(--accent, #2563eb);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  color: var(--text-primary, #e3e3e3);
+  animation: cctoast-in 160ms ease-out;
+  pointer-events: none;
+}
+.cc-toast .material-symbols-outlined { font-size: 18px; color: var(--accent, #2563eb); }
+.cc-toast-err { border-color: #ef4444; }
+.cc-toast-err .material-symbols-outlined { color: #ef4444; }
+@keyframes cctoast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 .spin { animation: ccspin 1s linear infinite; }
 @keyframes ccspin { to { transform: rotate(360deg); } }

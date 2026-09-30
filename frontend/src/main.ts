@@ -49,7 +49,7 @@ const state: {
   history: FileRec[]; update?: UpdateInfo;
   logs: { id: number; level: string; message: string }[];
   logCursor: number; logLevel: string;
-  editingProfile?: string; notice?: string;
+  editingProfile?: string; notice?: string; noticeErr?: boolean;
   importProfile?: string; // manual-import target — independent of active profile
   histCam?: string; histProfile?: string; histQ?: string;
 } = { panel: "dashboard", history: [], logs: [], logCursor: 0, logLevel: "ALL" };
@@ -86,7 +86,16 @@ function fmtTime(ts?: string): string {
   const d = new Date(ts);
   return isNaN(d.getTime()) ? ts : d.toLocaleString();
 }
-function toast(msg: string): void { state.notice = msg; setTimeout(() => { state.notice = undefined; render(); }, 3500); }
+let toastSeq = 0;
+function toast(msg: string, err = false): void {
+  const id = ++toastSeq;
+  state.notice = msg;
+  state.noticeErr = err;
+  setTimeout(() => { if (id === toastSeq) { state.notice = undefined; render(); } }, 3500);
+}
+function resultToast(r: { ok: boolean; error?: string }, okMsg: string): void {
+  toast(r.ok ? okMsg : (r.error ?? "failed"), !r.ok);
+}
 
 /* ---------- panels ---------- */
 function panelDashboard(): string {
@@ -404,8 +413,9 @@ function render(): void {
       <nav class="cc-nav">
         ${NAV.map(n => `<button class="cc-nav-item ${state.panel === n.id ? "active" : ""}" data-nav="${n.id}"><span class="material-symbols-outlined">${n.icon}</span>${n.label}</button>`).join("")}
       </nav>
-      <div class="cc-body">${state.notice ? `<div class="cc-card cc-notice">${esc(state.notice)}</div>` : ""}${body}</div>
+      <div class="cc-body">${body}</div>
     </div>
+    ${state.notice ? `<div class="cc-toast${state.noticeErr ? " cc-toast-err" : ""}"><span class="material-symbols-outlined">${state.noticeErr ? "error" : "check_circle"}</span>${esc(state.notice)}</div>` : ""}
   </div>`;
 
   // Restore input drafts, then focus + caret.
@@ -438,7 +448,7 @@ function wire(): void {
     el.addEventListener("click", () => { state.panel = (el as HTMLElement).dataset.nav as PanelID; lazyLoad(); render(); }));
 
   // shared
-  document.getElementById("btn-scan")?.addEventListener("click", async () => { const r = await execAction("scan-now"); toast(r.ok ? "Sync queued" : (r.error ?? "failed")); refresh(); });
+  document.getElementById("btn-scan")?.addEventListener("click", async () => { const r = await execAction("scan-now"); resultToast(r, "Sync queued"); refresh(); });
   document.getElementById("btn-pause")?.addEventListener("click", async () => {
     await execAction(state.status?.sync_paused ? "resume-sync" : "pause-sync"); refresh();
   });
@@ -453,13 +463,13 @@ function wire(): void {
     const mode = (document.getElementById("import-mode") as HTMLSelectElement)?.value;
     const profile_id = (document.getElementById("import-profile") as HTMLSelectElement)?.value;
     const r = await execAction("scan-now", JSON.stringify({ ...(mode ? { mode } : {}), ...(profile_id ? { profile_id } : {}) }));
-    toast(r.ok ? "Import started" : (r.error ?? "failed")); refresh();
+    resultToast(r, "Import started"); refresh();
   });
   document.querySelectorAll("[data-scan]").forEach(el =>
     el.addEventListener("click", async () => {
       const pid = (document.getElementById("import-profile") as HTMLSelectElement)?.value;
       const r = await execAction("scan-now", JSON.stringify({ device_id: (el as HTMLElement).dataset.scan, ...(pid ? { profile_id: pid } : {}) }));
-      toast(r.ok ? "Sync queued" : (r.error ?? "failed")); refresh();
+      resultToast(r, "Sync queued"); refresh();
     }));
 
   // profiles
@@ -512,7 +522,7 @@ function wire(): void {
 
   // backup
   document.getElementById("btn-retry")?.addEventListener("click", async () => {
-    const r = await execAction("retry-backups"); toast(r.ok ? "Requeued" : (r.error ?? "failed")); lazyLoad();
+    const r = await execAction("retry-backups"); resultToast(r, "Requeued"); lazyLoad();
   });
 
   // appdb
@@ -521,7 +531,7 @@ function wire(): void {
     const password = (document.getElementById("db-pass") as HTMLInputElement).value;
     const r = await execAction("appdb-login", JSON.stringify({ email, password }));
     if (r.ok) clearDrafts("db-"); // don't keep the password draft around
-    toast(r.ok ? "Signed in" : (r.error ?? "login failed")); lazyLoad(); render();
+    resultToast(r, "Signed in"); lazyLoad(); render();
   });
   document.getElementById("btn-logout")?.addEventListener("click", async () => {
     await execAction("appdb-logout"); toast("Signed out"); lazyLoad(); render();
@@ -530,13 +540,13 @@ function wire(): void {
     const passphrase = (document.getElementById("vault-pass") as HTMLInputElement).value;
     const r = await execAction("vault-push", JSON.stringify({ passphrase }));
     clearDrafts("vault-");
-    toast(r.ok ? "rclone.conf pushed (sealed)" : (r.error ?? "push failed"));
+    resultToast(r, "rclone.conf pushed (sealed)");
   });
   document.getElementById("btn-vpull")?.addEventListener("click", async () => {
     const passphrase = (document.getElementById("vault-pass") as HTMLInputElement).value;
     const r = await execAction("vault-pull", JSON.stringify({ passphrase }));
     clearDrafts("vault-");
-    toast(r.ok ? "rclone.conf pulled + written" : (r.error ?? "pull failed"));
+    resultToast(r, "rclone.conf pulled + written");
   });
 
   // history filters — no IPC needed, filters are client-side over loaded rows
@@ -561,17 +571,17 @@ function wire(): void {
       notify_on_complete: v("st-notify"),
     };
     const r = await execAction("save-config", JSON.stringify(payload));
-    toast(r.ok ? "Settings saved" : (r.error ?? "save failed")); refresh();
+    resultToast(r, "Settings saved"); refresh();
   });
 
   // about
   document.getElementById("btn-check-update")?.addEventListener("click", async () => {
     const r = await execAction("check-update");
-    if (r.ok) { state.update = r.data as UpdateInfo; render(); } else toast(r.error ?? "check failed");
+    if (r.ok) { state.update = r.data as UpdateInfo; render(); } else toast(r.error ?? "check failed", true);
   });
   document.getElementById("btn-dl-update")?.addEventListener("click", async () => {
     const r = await execAction("download-update", "{}");
-    toast(r.ok ? "Downloading update…" : (r.error ?? "download failed"));
+    resultToast(r, "Downloading update…");
   });
   document.getElementById("btn-github")?.addEventListener("click", () => {
     const url = "https://github.com/ngojclee/camera-connect";
@@ -590,7 +600,7 @@ async function saveProfiles(profiles: ProfileSnap[], cfg: ConfigSnap, openEdit?:
   if (paths) payload.profile_paths = paths;
   const r = await execAction("save-config", JSON.stringify(payload));
   if (openEdit) state.editingProfile = openEdit;
-  toast(r.ok ? "Profiles saved" : (r.error ?? "save failed"));
+  resultToast(r, "Profiles saved");
   refresh();
 }
 
