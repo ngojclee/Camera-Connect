@@ -222,6 +222,14 @@ func (a *WailsApp) refreshMinimizeToTray() {
 				log.Printf("[INFO] Loaded minimize_to_tray=%v from agent config", b)
 			}
 		}
+		// "Start minimized to tray" = open straight into the tray with no
+		// window popup; a second launch or tray "Open" shows it again.
+		if val, exists := data["start_minimized"]; exists {
+			if b, ok := val.(bool); ok && b {
+				log.Printf("[INFO] start_minimized=true — hiding window to tray")
+				wailsruntime.WindowHide(a.ctx)
+			}
+		}
 	}
 }
 

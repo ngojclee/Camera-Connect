@@ -63,7 +63,9 @@ Name: "{autoprograms}\Camera Connect"; Filename: "{app}\{#UIBinaryName}"; Workin
 Name: "{autodesktop}\Camera Connect"; Filename: "{app}\{#UIBinaryName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Registry]
-Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "CameraConnect"; ValueData: """{app}\CameraConnectAgent.exe"" --minimized"; Flags: uninsdeletevalue
+; Remove the stale HKLM autostart value older installers wrote — startup is
+; owned by the agent's "Start with Windows" setting (HKCU Run key).
+Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "CameraConnect"; Flags: deletevalue
 
 [Run]
 Filename: "{app}\CameraConnectAgent.exe"; Parameters: "--minimized"; Flags: nowait postinstall skipifsilent runasoriginaluser
