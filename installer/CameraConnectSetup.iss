@@ -111,6 +111,9 @@ end;
 function InitializeSetup(): Boolean;
 begin
   Log(Format('Installer UI runtime requested=%s effective=%s', ['{#UIRuntimeRequested}', '{#UIRuntime}']));
+  { Kill running app/agent here — AppMutex is checked right after
+    InitializeSetup returns, so this must happen before PrepareToInstall. }
+  StopRunningProcesses();
   Result := True;
 end;
 
